@@ -101,3 +101,4 @@ supabase.table("silver_hourly").upsert(rows, on_conflict="location_name,timestam
 print(f"Done! Inserted {len(rows)} rows into Silver.")
 print("Check your Supabase silver_hourly table.")
 
+
