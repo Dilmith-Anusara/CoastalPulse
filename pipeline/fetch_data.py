@@ -60,6 +60,18 @@ LOCATIONS = [
 TOURISM_ONLY = {"Mirissa", "Hikkaduwa", "Unawatuna", "Bentota", "Arugam Bay"}
 
 # ---------------------------------------------------------------------------
+# TEST MODE — set to True and run against ONE location first to confirm the
+# alignment assertion (see build_silver_rows) holds before committing to the
+# full 15-location / 18-month run. Flip back to False for the real run.
+# ---------------------------------------------------------------------------
+
+TEST_MODE = True
+TEST_LOCATION = "Chilaw"  # multi-mode location — exercises marine_ocean too
+
+if TEST_MODE:
+    LOCATIONS = [loc for loc in LOCATIONS if loc["name"] == TEST_LOCATION]
+
+# ---------------------------------------------------------------------------
 # Date range — 2025 only for now, 2024 backfill is a separate later run
 # ---------------------------------------------------------------------------
 
@@ -232,10 +244,35 @@ def purge_bronze(bronze_ids):
 # Silver
 # ---------------------------------------------------------------------------
 
+class TimestampMismatchError(Exception):
+    """Raised when one of the joined API payloads doesn't share the same
+    hourly timestamp array as marine_waves. Zipping by index in that case
+    would silently pair wrong-hour values together, so we refuse instead."""
+    pass
+
+
 def build_silver_rows(name, payload_map):
     m1, m2, m3 = payload_map["marine_waves"], payload_map["marine_swell"], payload_map["marine_ocean"]
     w, aq = payload_map["weather"], payload_map["air_quality"]
     times = m1["hourly"]["time"]
+
+    # --- Alignment check: every payload must share m1's exact hourly time
+    # array before we zip them together by positional index. If any API
+    # returned a partial/short response for the same requested date range,
+    # this catches it loudly instead of silently mis-joining rows. ---
+    to_check = [("marine_swell", m2), ("weather", w), ("air_quality", aq)]
+    if m3 is not None:
+        to_check.append(("marine_ocean", m3))
+
+    for label, payload in to_check:
+        other_times = payload["hourly"]["time"]
+        if other_times != times:
+            raise TimestampMismatchError(
+                f"{name}: '{label}' hourly timestamps do not match 'marine_waves' "
+                f"(lengths: {len(other_times)} vs {len(times)}). Refusing to build "
+                f"Silver rows for this chunk — would silently misalign data."
+            )
+
     rows = []
     for i in range(len(times)):
         rows.append({
@@ -275,6 +312,9 @@ def upsert_silver(rows):
 def run():
     ensure_tables()
 
+    if TEST_MODE:
+        print(f"*** TEST_MODE is ON — running only {[l['name'] for l in LOCATIONS]} ***\n")
+
     for loc in LOCATIONS:
         name = loc["name"]
         print(f"\n=== {name} ===")
@@ -290,7 +330,14 @@ def run():
                 continue
 
             bronze_ids = save_bronze(name, payload_map)
-            rows = build_silver_rows(name, payload_map)
+
+            try:
+                rows = build_silver_rows(name, payload_map)
+            except TimestampMismatchError as e:
+                print(f"    ALIGNMENT ERROR: {e}")
+                print(f"    Bronze kept (NOT purged) for {name} {chunk_start} to {chunk_end} for inspection.")
+                continue
+
             upsert_silver(rows)
             print(f"    Inserted {len(rows)} rows into Silver.")
 
