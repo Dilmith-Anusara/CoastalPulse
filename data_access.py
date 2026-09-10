@@ -31,7 +31,14 @@ from dotenv import load_dotenv
 # place data_access.py somewhere else.
 sys.path.insert(0, str(Path(__file__).resolve().parent / "pipeline"))
 try:
-    from fetch_data import LOCATIONS, TOURISM_ONLY  # noqa: E402
+    from fetch_data import LOCATIONS as _LOCATIONS_META, TOURISM_ONLY  # noqa: E402
+    # _LOCATIONS_META is [{"name": ..., "lat": ..., "lon": ...}, ...] — that
+    # shape is correct for the pipeline (it needs coordinates to fetch from),
+    # but the UI layer only ever wants plain location-name strings. Normalize
+    # here so app.py / pages/* can keep treating LOCATIONS as list[str], and
+    # expose the coordinates separately for anything that needs a map.
+    LOCATIONS = [loc["name"] for loc in _LOCATIONS_META]
+    LOCATION_COORDS = {loc["name"]: (loc["lat"], loc["lon"]) for loc in _LOCATIONS_META}
 except ImportError:
     # Fallback so this module can still be imported/tested standalone before
     # the pipeline/ folder is wired up in the same repo checkout. Keep this
@@ -43,6 +50,7 @@ except ImportError:
         "Tangalle", "Batticaloa", "Jaffna", "Matara", "Puttalam",
     ]
     TOURISM_ONLY = {"Mirissa", "Hikkaduwa", "Unawatuna", "Bentota", "Arugam Bay"}
+    LOCATION_COORDS = {}
 
 load_dotenv()
 

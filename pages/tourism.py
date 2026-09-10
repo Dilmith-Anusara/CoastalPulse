@@ -80,14 +80,23 @@ def update_tourism_page(location):
     conditions_fig = go.Figure()
     conditions_fig.add_trace(go.Scatter(x=df["date"], y=df["wave_height_mean"], name="Wave height (m)"))
     conditions_fig.add_trace(go.Scatter(x=df["date"], y=df["wind_speed_mean"], name="Wind speed (km/h)", yaxis="y2"))
-    if "sea_surface_temp_mean" in df.columns:
+    has_sst = "sea_surface_temp_mean" in df.columns and not df["sea_surface_temp_mean"].isna().all()
+    if has_sst:
         conditions_fig.add_trace(
-            go.Scatter(x=df["date"], y=df["sea_surface_temp_mean"], name="Sea surface temp (\u00b0C)", yaxis="y2")
+            go.Scatter(x=df["date"], y=df["sea_surface_temp_mean"], name="Sea surface temp (\u00b0C)", yaxis="y3")
         )
     conditions_fig.update_layout(
         title="Daylight-Hours Mean Conditions",
-        yaxis_title="meters",
-        yaxis2=dict(overlaying="y", side="right"),
+        yaxis=dict(title="meters", domain=[0, 0.86] if has_sst else [0, 1]),
+        # wind speed (km/h) and sea surface temp (\u00b0C) are different units,
+        # so each gets its own axis rather than sharing one secondary axis —
+        # overlaying them together made the chart unreadable.
+        yaxis2=dict(title="km/h", overlaying="y", side="right"),
+        yaxis3=dict(
+            title="\u00b0C", overlaying="y", side="right",
+            anchor="free", position=1.0, showgrid=False,
+        ) if has_sst else {},
+        margin=dict(r=80) if has_sst else {},
     )
 
     return suit_fig, sst_note, conditions_fig

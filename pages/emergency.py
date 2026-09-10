@@ -12,7 +12,7 @@ import dash
 from dash import html, dcc, callback, Input, Output
 import plotly.graph_objects as go
 
-from data_access import get_emergency_data, LOCATIONS
+from data_access import get_emergency_data, LOCATIONS, LOCATION_COORDS
 
 dash.register_page(__name__, path="/", name="Emergency")
 
@@ -22,19 +22,10 @@ CLASSIFICATION_COLORS = {
     "Dangerous": "#e74c3c",
 }
 
-# Approximate coordinates for the map view. Fill these in from
-# fetch_data.py's real LOCATIONS metadata if it stores lat/lon —
-# these are placeholders only, replace before relying on the map.
-LOCATION_COORDS = {
-    "Mirissa": (5.9483, 80.4589), "Hikkaduwa": (6.1400, 80.1000),
-    "Unawatuna": (6.0100, 80.2500), "Bentota": (6.4260, 79.9950),
-    "Arugam Bay": (6.8400, 81.8360), "Negombo": (7.2080, 79.8380),
-    "Galle": (6.0328, 80.2170), "Trincomalee": (8.5870, 81.2150),
-    "Chilaw": (7.5750, 79.7950), "Colombo": (6.9271, 79.8612),
-    "Tangalle": (6.0240, 80.7930), "Batticaloa": (7.7170, 81.7000),
-    "Jaffna": (9.6650, 80.0080), "Matara": (5.9480, 80.5350),
-    "Puttalam": (8.0360, 79.8280),
-}
+# Coordinates now come from data_access.LOCATION_COORDS, which is derived
+# from pipeline/fetch_data.py's LOCATIONS (single source of truth). Do not
+# redefine coordinates here — that duplication is exactly what caused the
+# LOCATIONS/TOURISM_ONLY drift bug data_access.py's docstring warns about.
 
 layout = html.Div(
     [
@@ -109,11 +100,11 @@ def update_emergency_page(location):
     wind_pressure_fig.add_trace(
         go.Scatter(x=df["date"], y=df["wind_speed_max"], name="Wind speed max (km/h)")
     )
-    if "atmospheric_pressure_max" in df.columns:
+    if "pressure_min" in df.columns:
         wind_pressure_fig.add_trace(
             go.Scatter(
-                x=df["date"], y=df["atmospheric_pressure_max"],
-                name="Pressure max (hPa)", yaxis="y2",
+                x=df["date"], y=df["pressure_min"],
+                name="Pressure min (hPa)", yaxis="y2",
             )
         )
         wind_pressure_fig.update_layout(
