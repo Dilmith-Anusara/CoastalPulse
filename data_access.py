@@ -31,14 +31,7 @@ from dotenv import load_dotenv
 # place data_access.py somewhere else.
 sys.path.insert(0, str(Path(__file__).resolve().parent / "pipeline"))
 try:
-    from fetch_data import LOCATIONS as _LOCATIONS_META, TOURISM_ONLY  # noqa: E402
-    # _LOCATIONS_META is [{"name": ..., "lat": ..., "lon": ...}, ...] — that
-    # shape is correct for the pipeline (it needs coordinates to fetch from),
-    # but the UI layer only ever wants plain location-name strings. Normalize
-    # here so app.py / pages/* can keep treating LOCATIONS as list[str], and
-    # expose the coordinates separately for anything that needs a map.
-    LOCATIONS = [loc["name"] for loc in _LOCATIONS_META]
-    LOCATION_COORDS = {loc["name"]: (loc["lat"], loc["lon"]) for loc in _LOCATIONS_META}
+    from fetch_data import LOCATIONS, TOURISM_ONLY  # noqa: E402
 except ImportError:
     # Fallback so this module can still be imported/tested standalone before
     # the pipeline/ folder is wired up in the same repo checkout. Keep this
@@ -50,7 +43,6 @@ except ImportError:
         "Tangalle", "Batticaloa", "Jaffna", "Matara", "Puttalam",
     ]
     TOURISM_ONLY = {"Mirissa", "Hikkaduwa", "Unawatuna", "Bentota", "Arugam Bay"}
-    LOCATION_COORDS = {}
 
 load_dotenv()
 
@@ -88,6 +80,35 @@ def _validate_location(location: str | None):
         raise ValueError(
             f"Unknown location '{location}'. Must be one of {LOCATIONS}."
         )
+
+
+# --- Data freshness -----------------------------------------------------------
+
+@cache_stub
+def get_last_updated() -> pd.Timestamp | None:
+    """
+    Most recent `inserted_at` timestamp across silver_hourly — the honest
+    freshness signal for the header badge, replacing a decorative "LIVE"
+    indicator. This pipeline is a scheduled batch job, not a real-time feed,
+    so the UI should say "Updated 3h ago", not imply a live stream.
+
+    Returns None (never raises) if Supabase isn't reachable/configured yet,
+    so a bad connection degrades the badge, not the whole app.
+    """
+    try:
+        resp = (
+            get_client()
+            .table("silver_hourly")
+            .select("inserted_at")
+            .order("inserted_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if resp.data:
+            return pd.to_datetime(resp.data[0]["inserted_at"], utc=True)
+    except Exception:
+        pass
+    return None
 
 
 # --- Emergency mode -----------------------------------------------------------

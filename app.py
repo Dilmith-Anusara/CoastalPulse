@@ -4,17 +4,36 @@ Coastal Intelligence & Decision Support Platform
 
 Main application shell.
 
-Expected pages:
-    /
-    /emergency
-    /tourism
-    /fisherman
+Routes (fixed to match the nav — IMPORTANT for the pages step):
+    /            -> pages/overview.py     (not built yet)
+    /emergency   -> pages/emergency.py    (must register path="/emergency", NOT "/")
+    /tourism     -> pages/tourism.py
+    /fisherman   -> pages/fisherman.py
+
+This app.py owns two contracts every page must honor:
+
+1. ROUTING — see above. If a page registers the wrong path, the nav will
+   look right but clicking it will 404 or land on the wrong content.
+
+2. VERDICT / DETAIL SPLIT — the audience is tourists, residents, and
+   fishermen, not statisticians. Nobody opening this at 5am wants to read
+   a wave-height line chart against a dashed threshold line; they want
+   "Go" or "Don't go, waves 2.8m." So every page's layout must put:
+     - the plain-language status card / recommendation in a container
+       with className="cp-verdict-zone" (ALWAYS visible)
+     - charts, trends, and anything requiring interpretation in a
+       container with className="cp-detail-zone" (hidden by default,
+       revealed by the "Show details" switch in the header)
+   This is enforced with a single CSS rule keyed off the app-root class,
+   not per-page callbacks — so no page needs to reimplement show/hide
+   logic, and it can't drift out of sync across pages the way the
+   location lists did in the pipeline.
 """
 
 import dash
-from dash import Dash, html, dcc, Input, Output, callback
+from dash import Dash, html, dcc, Input, Output, State, callback
 
-from data_access import LOCATIONS
+from data_access import LOCATIONS, get_last_updated
 
 
 # ============================================================
@@ -236,27 +255,120 @@ app.index_string = """
             gap: 22px;
         }
 
-        .cp-live {
+
+        /* ==================================================
+           FRESHNESS BADGE
+           (replaces the old decorative "LIVE" dot — this is a
+           scheduled batch pipeline, not a live stream, so the
+           badge says how stale the data actually is)
+        ================================================== */
+
+        .cp-freshness {
             display: flex;
             align-items: center;
             gap: 7px;
 
-            color: #138a55;
-
             font-size: 10px;
             font-weight: 700;
-            letter-spacing: 0.9px;
+            letter-spacing: 0.7px;
+
+            padding: 6px 10px;
+            border-radius: 5px;
         }
 
-        .cp-live-dot {
+        .cp-freshness-dot {
             width: 7px;
             height: 7px;
+            border-radius: 50%;
+        }
+
+        .cp-freshness-fresh {
+            color: #13734a;
+            background: #edf8f2;
+        }
+
+        .cp-freshness-fresh .cp-freshness-dot {
+            background: #16a765;
+            box-shadow: 0 0 0 4px rgba(22, 167, 101, 0.10);
+        }
+
+        .cp-freshness-stale {
+            color: #986000;
+            background: #fff6e5;
+        }
+
+        .cp-freshness-stale .cp-freshness-dot {
+            background: #e89a13;
+        }
+
+        .cp-freshness-unknown {
+            color: #7a8b94;
+            background: #f0f3f4;
+        }
+
+        .cp-freshness-unknown .cp-freshness-dot {
+            background: #aab8be;
+        }
+
+
+        /* ==================================================
+           DETAIL TOGGLE
+        ================================================== */
+
+        .cp-detail-toggle {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .cp-detail-toggle-label {
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.6px;
+            color: #70818b;
+        }
+
+        .cp-switch {
+            position: relative;
+
+            width: 36px;
+            height: 20px;
+
+            border: none;
+            border-radius: 999px;
+
+            background: #cbd8dd;
+
+            cursor: pointer;
+            padding: 0;
+
+            transition: background 0.15s ease;
+        }
+
+        .cp-switch.on {
+            background: #11b6d1;
+        }
+
+        .cp-switch::after {
+            content: "";
+
+            position: absolute;
+            top: 2px;
+            left: 2px;
+
+            width: 16px;
+            height: 16px;
 
             border-radius: 50%;
+            background: #ffffff;
 
-            background: #16a765;
+            transition: left 0.15s ease;
 
-            box-shadow: 0 0 0 4px rgba(22, 167, 101, 0.10);
+            box-shadow: 0 1px 2px rgba(9, 35, 47, 0.25);
+        }
+
+        .cp-switch.on::after {
+            left: 18px;
         }
 
 
@@ -394,6 +506,29 @@ app.index_string = """
 
         .cp-content {
             width: 100%;
+        }
+
+
+        /* ==================================================
+           VERDICT / DETAIL ZONES
+
+           Every page puts its plain-language status card in
+           cp-verdict-zone (always shown) and its charts in
+           cp-detail-zone (hidden until the header switch is on).
+           Toggling one class here controls every page — no
+           per-page show/hide logic needed.
+        ================================================== */
+
+        .cp-verdict-zone {
+            margin-bottom: 24px;
+        }
+
+        .cp-detail-zone {
+            display: none;
+        }
+
+        .cp-app.detail-on .cp-detail-zone {
+            display: block;
         }
 
 
@@ -610,7 +745,7 @@ app.index_string = """
                 gap: 10px;
             }
 
-            .cp-live {
+            .cp-detail-toggle-label {
                 display: none;
             }
 
@@ -711,6 +846,56 @@ brand = html.Div(
 
 
 # ============================================================
+# FRESHNESS BADGE (replaces the fake "LIVE" dot)
+# ============================================================
+#
+# This is a scheduled batch pipeline (Bronze -> Silver -> Gold), not a
+# real-time feed. A pulsing "LIVE" dot next to data that's actually hours
+# or a day old will erode trust the moment someone checks a timestamp.
+# This badge shows how stale the data genuinely is, using the real
+# MAX(inserted_at) from silver_hourly via data_access.get_last_updated().
+#
+# It refreshes on an interval rather than only at page load, so leaving
+# the tab open doesn't show an increasingly wrong "just now".
+
+freshness_badge = html.Div(
+    [
+        html.Div(id="freshness-dot", className="cp-freshness-dot"),
+        html.Span(id="freshness-text", children="Checking data\u2026"),
+    ],
+    id="freshness-badge",
+    className="cp-freshness cp-freshness-unknown",
+)
+
+freshness_interval = dcc.Interval(
+    id="freshness-interval",
+    interval=5 * 60 * 1000,  # 5 minutes — matches the planned cache TTL
+    n_intervals=0,
+)
+
+
+# ============================================================
+# DETAIL TOGGLE
+# ============================================================
+#
+# Default OFF: every page opens showing only its plain-language verdict
+# (status card / recommendation). Switching this on reveals the
+# cp-detail-zone containers — charts, trends, comparisons — for the
+# smaller audience that wants to dig in (a resident tracking a storm,
+# a fisherman planning several days out).
+
+detail_mode_store = dcc.Store(id="detail-mode", storage_type="session", data=False)
+
+detail_toggle = html.Div(
+    [
+        html.Span("SHOW DETAILS", className="cp-detail-toggle-label"),
+        html.Button(id="detail-toggle-btn", className="cp-switch", n_clicks=0),
+    ],
+    className="cp-detail-toggle",
+)
+
+
+# ============================================================
 # LOCATION SELECTOR
 # ============================================================
 
@@ -760,19 +945,8 @@ header = html.Header(
 
         html.Div(
             [
-                html.Div(
-                    [
-                        html.Div(
-                            className="cp-live-dot",
-                        ),
-
-                        html.Span(
-                            "LIVE",
-                        ),
-                    ],
-                    className="cp-live",
-                ),
-
+                freshness_badge,
+                detail_toggle,
                 location_selector,
             ],
             className="cp-header-right",
@@ -848,6 +1022,8 @@ app.layout = html.Div(
     [
         # Shared state
         location_store,
+        detail_mode_store,
+        freshness_interval,
 
         # URL
         dcc.Location(
@@ -871,6 +1047,7 @@ app.layout = html.Div(
             className="cp-page",
         ),
     ],
+    id="app-root",
     className="cp-app",
 )
 
@@ -903,6 +1080,31 @@ def sync_selected_location(value):
 )
 def sync_location_dropdown(value):
     return value
+
+
+# ============================================================
+# DETAIL TOGGLE → SHARED STORE
+# ============================================================
+
+@callback(
+    Output("detail-mode", "data"),
+    Input("detail-toggle-btn", "n_clicks"),
+    State("detail-mode", "data"),
+    prevent_initial_call=True,
+)
+def toggle_detail_mode(_n_clicks, current):
+    return not current
+
+
+@callback(
+    Output("app-root", "className"),
+    Output("detail-toggle-btn", "className"),
+    Input("detail-mode", "data"),
+)
+def apply_detail_mode(is_on):
+    base_class = "cp-app detail-on" if is_on else "cp-app"
+    switch_class = "cp-switch on" if is_on else "cp-switch"
+    return base_class, switch_class
 
 
 # ============================================================
@@ -1024,6 +1226,51 @@ def update_context_date(pathname):
     # the date of the coastal observation.
 
     return "Coastal monitoring"
+
+
+# ============================================================
+# FRESHNESS BADGE (real data, not decorative)
+# ============================================================
+
+@callback(
+    Output("freshness-dot", "className"),
+    Output("freshness-text", "children"),
+    Output("freshness-badge", "className"),
+    Input("freshness-interval", "n_intervals"),
+)
+def update_freshness_badge(_n_intervals):
+
+    last_updated = get_last_updated()
+
+    if last_updated is None:
+        return (
+            "cp-freshness-dot",
+            "Freshness unknown",
+            "cp-freshness cp-freshness-unknown",
+        )
+
+    import pandas as pd
+
+    age = pd.Timestamp.utcnow() - last_updated
+    hours = age.total_seconds() / 3600
+
+    if hours < 1:
+        minutes = int(age.total_seconds() / 60)
+        label = f"Updated {minutes}m ago" if minutes > 0 else "Updated just now"
+    elif hours < 48:
+        label = f"Updated {int(hours)}h ago"
+    else:
+        label = f"Updated {int(hours / 24)}d ago"
+
+    # This is a daily batch pipeline — treat anything past ~36h as stale
+    # rather than pretending it's current.
+    state = "fresh" if hours < 36 else "stale"
+
+    return (
+        "cp-freshness-dot",
+        label,
+        f"cp-freshness cp-freshness-{state}",
+    )
 
 
 # ============================================================
