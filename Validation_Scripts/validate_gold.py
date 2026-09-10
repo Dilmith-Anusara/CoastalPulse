@@ -74,7 +74,7 @@ def load_table(conn, table_name: str) -> pd.DataFrame:
 
 
 def check_all_locations_present(df: pd.DataFrame, table_name: str, report: list):
-    from fetch_data import LOCATIONS
+    from fetch_data import LOCATIONS # type: ignore
 
     all_expected = {loc["name"] for loc in LOCATIONS}
     present = set(df["location_name"].unique())
@@ -245,7 +245,7 @@ def check_sea_surface_temp_null_pattern(tourism_df: pd.DataFrame, report: list):
     gold_tourism_daily — that inference broke once build_gold.py started
     running Emergency for all 15 locations instead of a hand-typed subset.
     """
-    from fetch_data import TOURISM_ONLY
+    from fetch_data import TOURISM_ONLY #type: ignore
 
     report.append(f"\n--- gold_tourism_daily: sea_surface_temp_mean null pattern check ---")
 
