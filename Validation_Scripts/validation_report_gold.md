@@ -31,6 +31,9 @@
 --- gold_emergency_daily: classification consistency ---
 ✅ all classification values match re-derived thresholds from wave_height_max.
 
+--- gold_emergency_daily: literal NaN check (distinct from SQL NULL) ---
+✅ gold_emergency_daily: no literal NaN values found in any numeric column.
+
 ## gold_tourism_daily (8190 total rows, 15 locations)
 
 ✅ gold_tourism_daily: all 15 locations from fetch_data.py's LOCATIONS are present.
@@ -83,3 +86,6 @@ Negombo        12
 Puttalam       12
 Tangalle       12
 Trincomalee    12
+
+--- gold_tourism_daily: literal NaN check (distinct from SQL NULL) ---
+✅ gold_tourism_daily: no literal NaN values found in any numeric column.

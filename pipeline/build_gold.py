@@ -21,11 +21,30 @@ import os
 from dotenv import load_dotenv
 import psycopg2
 import pandas as pd
+import math
 from datetime import datetime
 
 load_dotenv()
 
 SUPABASE_DB_URL = os.environ["SUPABASE_DB_URL"]
+
+
+def clean_value(v):
+    """
+    Convert pandas/numpy NaN to Python None before it reaches psycopg2.
+
+    Root cause: pandas represents missing numeric data as float NaN, not
+    None. psycopg2 correctly converts Python None -> SQL NULL, but passes
+    float NaN through literally, so Postgres stores a real NaN value in the
+    double precision column instead of NULL. `column IS NULL` does NOT match
+    NaN (they're different things in Postgres), which silently breaks any
+    downstream null-checking SQL that assumes IS NULL catches all missing
+    values. Every value inserted via upsert_emergency/upsert_tourism must be
+    run through this first.
+    """
+    if isinstance(v, float) and math.isnan(v):
+        return None
+    return v
 
 # Wave height thresholds, reconstructed from Sri Lankan DoM advisory language
 # (per handoff: not an official published table — flag this in the report)
@@ -208,9 +227,9 @@ def upsert_emergency(conn, df: pd.DataFrame):
                 hours_covered = EXCLUDED.hours_covered;
             """,
             (
-                r["location_name"], r["date"], r["wave_height_max"],
-                r["wind_speed_max"], r["wind_gust_max"], r["pressure_min"],
-                r["classification"], int(r["hours_covered"]),
+                clean_value(r["location_name"]), clean_value(r["date"]), clean_value(r["wave_height_max"]),
+                clean_value(r["wind_speed_max"]), clean_value(r["wind_gust_max"]), clean_value(r["pressure_min"]),
+                clean_value(r["classification"]), int(r["hours_covered"]),
             ),
         )
     conn.commit()
@@ -237,10 +256,10 @@ def upsert_tourism(conn, df: pd.DataFrame):
                 daylight_hours_covered = EXCLUDED.daylight_hours_covered;
             """,
             (
-                r["location_name"], r["date"], r["wave_height_mean"],
-                r["wind_speed_mean"], r["sea_surface_temp_mean"],
-                r["uv_index_mean"], r["precipitation_sum"],
-                r["suitability_score"], int(r["daylight_hours_covered"]),
+                clean_value(r["location_name"]), clean_value(r["date"]), clean_value(r["wave_height_mean"]),
+                clean_value(r["wind_speed_mean"]), clean_value(r["sea_surface_temp_mean"]),
+                clean_value(r["uv_index_mean"]), clean_value(r["precipitation_sum"]),
+                clean_value(r["suitability_score"]), int(r["daylight_hours_covered"]),
             ),
         )
     conn.commit()

@@ -34,10 +34,12 @@ import psycopg2
 import pandas as pd
 from datetime import timedelta
 
-# fetch_data.py lives in pipeline/, one level down from this script's location
-# at the project root — add it to sys.path so `from fetch_data import ...`
-# works regardless of the current working directory you run this from.
-sys.path.insert(0, str(Path(__file__).resolve().parent / "pipeline"))
+# fetch_data.py lives in pipeline/, which is a SIBLING of this script's
+# parent folder (validation_scripts/) at the project root — i.e. both sit
+# one level down from "Big Data Analytics/". Add the pipeline/ folder
+# itself to sys.path so a bare `from fetch_data import ...` works,
+# regardless of which directory you run this script from.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "pipeline"))
 
 load_dotenv()
 SUPABASE_DB_URL = os.environ["SUPABASE_DB_URL"]
@@ -72,7 +74,7 @@ def load_table(conn, table_name: str) -> pd.DataFrame:
 
 
 def check_all_locations_present(df: pd.DataFrame, table_name: str, report: list):
-    from pipeline.fetch_data import LOCATIONS
+    from fetch_data import LOCATIONS
 
     all_expected = {loc["name"] for loc in LOCATIONS}
     present = set(df["location_name"].unique())
@@ -135,6 +137,38 @@ def check_nulls(df: pd.DataFrame, table_name: str, columns: list, report: list):
     else:
         report.append(f"⚠️ {table_name}: null counts found:")
         report.append(null_counts.to_string())
+
+
+def check_literal_nan(conn, table_name: str, numeric_columns: list, report: list):
+    """
+    pandas' .isnull() (used in check_nulls above) catches both SQL NULL and
+    literal float NaN. But raw SQL 'column IS NULL' does NOT match NaN --
+    they are different stored values in Postgres. If build_gold.py's
+    clean_value() step is ever skipped or reverted, NaN can get written
+    directly into a double precision column and silently evade any
+    IS NULL-based check, while still breaking MAX/AVG aggregates downstream.
+    This check queries Postgres directly with '= NaN' to catch that
+    specific failure mode, independent of the pandas-based check above.
+    """
+    report.append(f"\n--- {table_name}: literal NaN check (distinct from SQL NULL) ---")
+    cur = conn.cursor()
+    any_found = False
+    for column in numeric_columns:
+        cur.execute(f"SELECT COUNT(*) FROM {table_name} WHERE {column} = 'NaN'::float8;")
+        count = cur.fetchone()[0]
+        if count > 0:
+            any_found = True
+            report.append(
+                f"❌ {column}: {count} row(s) contain literal NaN (not SQL NULL) — "
+                f"these will NOT be caught by 'IS NULL' queries and will silently break "
+                f"MAX/AVG aggregates. Likely cause: build_gold.py inserted a pandas NaN "
+                f"without converting it to None first (see clean_value() in build_gold.py). "
+                f"Fix: rerun build_gold.py with clean_value() applied, which will "
+                f"overwrite these via the ON CONFLICT upsert."
+            )
+    cur.close()
+    if not any_found:
+        report.append(f"✅ {table_name}: no literal NaN values found in any numeric column.")
 
 
 def check_plausible_ranges(df: pd.DataFrame, table_name: str, report: list):
@@ -211,7 +245,7 @@ def check_sea_surface_temp_null_pattern(tourism_df: pd.DataFrame, report: list):
     gold_tourism_daily — that inference broke once build_gold.py started
     running Emergency for all 15 locations instead of a hand-typed subset.
     """
-    from pipeline.fetch_data import TOURISM_ONLY
+    from fetch_data import TOURISM_ONLY
 
     report.append(f"\n--- gold_tourism_daily: sea_surface_temp_mean null pattern check ---")
 
@@ -261,6 +295,11 @@ def main():
     )
     check_plausible_ranges(emergency_df, "gold_emergency_daily", report)
     check_classification_consistency(emergency_df, report)
+    check_literal_nan(
+        conn, "gold_emergency_daily",
+        ["wave_height_max", "wind_speed_max", "wind_gust_max", "pressure_min"],
+        report,
+    )
 
     # --- Tourism ---
     tourism_df = load_table(conn, "gold_tourism_daily")
@@ -283,6 +322,12 @@ def main():
     check_plausible_ranges(tourism_df, "gold_tourism_daily", report)
     check_suitability_score_range(tourism_df, report)
     check_sea_surface_temp_null_pattern(tourism_df, report)
+    check_literal_nan(
+        conn, "gold_tourism_daily",
+        ["wave_height_mean", "wind_speed_mean", "sea_surface_temp_mean",
+         "uv_index_mean", "precipitation_sum", "suitability_score"],
+        report,
+    )
 
     conn.close()
 
