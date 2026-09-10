@@ -2,6 +2,15 @@
 CoastalPulse — Silver layer validation
 Run: python validate_silver.py
 
+Writes a single Markdown report (validation_report.md by default) instead of
+printing to the terminal — nothing is printed to stdout during a normal run.
+
+NOTE ON UNITS: wind_speed and wind_gust are stored in km/h, not m/s.
+fetch_data.py never sets Open-Meteo's `windspeed_unit` parameter, so the
+Historical Weather API returns its default unit (km/h). Nothing about the
+fetched data is wrong — it was only mislabeled/checked against the wrong
+unit previously. PLAUSIBLE_RANGES and the printed labels below reflect km/h.
+
 Checks one location's silver_hourly data against:
   1. Row coverage vs expected hourly count for the date range
   2. Timestamp gaps (missing hours) and duplicate timestamps
@@ -28,7 +37,9 @@ Uses SUPABASE_DB_URL directly (psycopg2) rather than supabase-py, since this
 needs GROUP BY / gap analysis that the REST client doesn't do well.
 """
 
+import io
 import os
+from contextlib import redirect_stdout
 from datetime import date, datetime, timedelta
 
 import psycopg2
@@ -37,6 +48,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 SUPABASE_DB_URL = os.getenv("SUPABASE_DB_URL")
+
+REPORT_PATH = "validation_report.md"
 
 # ---------------------------------------------------------------------------
 # Config — mirrors the fetch pipeline
@@ -56,7 +69,10 @@ ZERO_TOLERANCE_COLUMNS = [
 OCEAN_ONLY_COLUMNS = ["sea_surface_temp", "ocean_current_velocity", "ocean_current_direction"]
 ALWAYS_NULL_COLUMNS = ["sea_level_height"]  # no endpoint wired up yet, documented gap
 
-# (column, min, max) — generous physical bounds, flags parsing/unit errors, not weather itself
+# (column, min, max) — generous physical bounds, flags parsing/unit errors, not weather itself.
+# wind_speed / wind_gust bounds are in km/h (Open-Meteo's default unit — see module note above),
+# set generously above Ditwah's real reported peak (~90 km/h sustained, ~85 km/h gust) to leave
+# headroom for other/future storms without being so loose it stops catching real errors.
 PLAUSIBLE_RANGES = {
     "wave_height": (0, 8),
     "wave_period": (0, 25),
@@ -68,8 +84,8 @@ PLAUSIBLE_RANGES = {
     "sea_surface_temp": (20, 34),
     "ocean_current_velocity": (0, 5),
     "ocean_current_direction": (0, 360),
-    "wind_speed": (0, 40),
-    "wind_gust": (0, 60),
+    "wind_speed": (0, 150),   # km/h
+    "wind_gust": (0, 220),    # km/h
     "precipitation": (0, 100),
     "atmospheric_pressure": (950, 1050),
     "uv_index": (0, 16),
@@ -95,6 +111,9 @@ def section(title):
 
 
 def validate_location(location_name):
+    """Runs all checks for one location. All print() calls inside this
+    function are captured by run_all() via redirect_stdout — nothing here
+    reaches the real terminal."""
     is_tourism_only = location_name in TOURISM_ONLY
     conn = get_conn()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -158,9 +177,13 @@ def validate_location(location_name):
             print(f"      {start}  →  {end}   ({hrs} hours missing)")
         if len(gaps) > 15:
             print(f"      ... and {len(gaps) - 15} more gaps")
-        print("  Note: a nationwide 13-day sea_surface_temp gap (2025-01-29 to 2025-02-11) is a known,")
-        print("  confirmed upstream issue, not a fetch bug. Doesn't apply structurally to tourism-only")
-        print("  locations like this one, since sea_surface_temp isn't fetched for them at all.")
+        # This note only applies to locations that actually fetch sea_surface_temp —
+        # printing it unconditionally would be misleading for tourism-only locations,
+        # where that column isn't fetched at all and can't be the cause of any gap.
+        if not is_tourism_only:
+            print("  Note: a nationwide 13-day sea_surface_temp gap (2025-01-29 to 2025-02-11) is a known,")
+            print("  confirmed upstream issue, not a fetch bug, IF this location's gap(s) fall in that window.")
+            print("  Check the gap dates above against that window before assuming it's the same cause.")
 
     # -----------------------------------------------------------------
     # 3. Null discipline
@@ -244,6 +267,11 @@ def validate_location(location_name):
                   f"(diff={diff:.2f}m, n={r['n']} rows)")
         print("  Note: this is a loose sanity check (±0.35m tolerance), not a re-validation of the")
         print("  original feasibility analysis — large deviations are worth a closer look, small ones aren't.")
+    else:
+        section("5. Monsoon-season sanity check")
+        print(f"  Skipped — no established feasibility-analysis baseline exists for {location_name} yet.")
+        print("  Only Mirissa has a baseline from the interim feasibility work. Add one here once you have")
+        print("  an independent reference to check against, otherwise this section has nothing to compare to.")
 
     # -----------------------------------------------------------------
     # 6. Cross-variable physical consistency
@@ -309,6 +337,9 @@ def validate_location(location_name):
         print(f"  {flag} {col:<20} {r2['n']} outliers ({pct:.2f}%){note}")
     print("  Note: 3x-IQR is deliberately loose — flags statistical rarity, not necessarily errors.")
     print("  A real storm (like Ditwah) will show up here too; that's expected, not a failure.")
+    print("  Note: precipitation is zero-inflated (most hours are 0mm), so its Q1/Q3 sit near zero and")
+    print("  ordinary rain will register as a mathematical 'outlier' here — treat this column's result")
+    print("  as noise, not a data quality signal, until a fixed physical threshold replaces IQR for it.")
 
     # -----------------------------------------------------------------
     # 8. Frozen-value detection (stale/carried-forward data artifact)
@@ -340,7 +371,10 @@ def validate_location(location_name):
             max_run, max_run_start = run_len, run_start
         if max_run >= FREEZE_RUN_THRESHOLD:
             any_frozen = True
-            print(f"  ⚠️  {col}: longest identical-value run = {max_run} hours, starting {max_run_start}")
+            note = ""
+            if col == "uv_index":
+                note = "  (likely nighttime, uv_index=0 for ~12-14h every night — not necessarily stuck)"
+            print(f"  ⚠️  {col}: longest identical-value run = {max_run} hours, starting {max_run_start}{note}")
         else:
             print(f"  ✓ {col}: longest identical-value run = {max_run} hours (below {FREEZE_RUN_THRESHOLD}h threshold)")
     if not any_frozen:
@@ -380,7 +414,10 @@ def validate_location(location_name):
         print(f"  Nov 27-28 window: min pressure={event['min_p']} hPa (baseline avg={float(baseline_p):.1f} hPa, "
               f"drop={pressure_drop:.1f} hPa)")
         print(f"  Nov 27-28 window: max precipitation={event['max_precip']} mm, "
-              f"max wave_height={event['max_wave']} m, max wind_gust={event['max_gust']} m/s")
+              f"max wave_height={event['max_wave']} m, max wind_gust={event['max_gust']} km/h")
+        print(f"  Reference (independently reported, IMD/World Bank GRADE): Ditwah peak winds ~65-90 km/h")
+        print(f"  sustained, gusts up to ~85 km/h at landfall. Compare this location's max_gust above")
+        print(f"  against that range as a sanity check — values wildly above it are worth a closer look.")
         if pressure_drop > 3:
             print("  ✓ Pressure drop is consistent with a real storm system passing through")
         else:
@@ -393,8 +430,52 @@ def validate_location(location_name):
     conn.close()
 
 
+def run_all(locations, report_path=REPORT_PATH):
+    """Runs validate_location() for each location, capturing all of its
+    stdout output and writing it into one Markdown report file. Nothing is
+    printed to the real terminal during this process. If a location crashes
+    (e.g. no rows yet, or a DB error), that's recorded in its section instead
+    of stopping the whole run."""
+    report_parts = [
+        "# CoastalPulse Silver Layer Validation Report",
+        f"\nGenerated: {datetime.now().isoformat(timespec='seconds')}",
+        f"\nLocations checked: {', '.join(locations)}",
+        "\n**Units note:** wind_speed and wind_gust are stored in km/h "
+        "(Open-Meteo's default — fetch_data.py does not override it).",
+    ]
+
+    for loc in locations:
+        buf = io.StringIO()
+        try:
+            with redirect_stdout(buf):
+                validate_location(loc)
+        except Exception as e:
+            buf.write(f"\n\n!! VALIDATION CRASHED for {loc}: {e!r}\n")
+
+        captured = buf.getvalue()
+        report_parts.append(f"\n---\n\n## {loc}\n\n```text{captured}\n```")
+
+    with open(report_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(report_parts))
+
+
 if __name__ == "__main__":
     # Add more location names here as you fetch them
-    LOCATIONS_TO_VALIDATE = ["Mirissa"]
-    for loc in LOCATIONS_TO_VALIDATE:
-        validate_location(loc)
+    LOCATIONS_TO_VALIDATE = [
+        "Mirissa",
+        "Hikkaduwa",
+        "Unawatuna",
+        "Bentota",
+        "Arugam Bay",
+        "Negombo",
+        "Galle",
+        "Trincomalee",
+        "Chilaw",
+        "Colombo",
+        "Tangalle",
+        "Batticaloa",
+        "Jaffna",
+        "Matara",
+        "Puttalam",
+    ]
+    run_all(LOCATIONS_TO_VALIDATE)

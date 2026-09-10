@@ -65,7 +65,7 @@ TOURISM_ONLY = {"Mirissa", "Hikkaduwa", "Unawatuna", "Bentota", "Arugam Bay"}
 # full 15-location / 18-month run. Flip back to False for the real run.
 # ---------------------------------------------------------------------------
 
-TEST_MODE = True
+TEST_MODE = False
 TEST_LOCATION = "Chilaw"  # multi-mode location — exercises marine_ocean too
 
 if TEST_MODE:
