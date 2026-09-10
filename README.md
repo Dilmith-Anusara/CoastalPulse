@@ -1,128 +1,72 @@
-# CoastalPulse
+# CoastalPulse Dashboard — Skeleton
 
-Marine and coastal weather analytics dashboard for Sri Lanka, built for the DS4004 Big Data Analytics module, BSc Data Science, University of Colombo School of Computing.
+This is dashboard build Steps 1-3 + the Fisherman shell (Step 5), per the
+handoff plan. **All files compile and `data_access.py` smoke-tests clean**,
+but nothing here has been run against your real Supabase instance yet.
 
-CoastalPulse ingests hourly marine, weather, and air quality data for 15 coastal locations around Sri Lanka and serves it through three purpose-built dashboard modes:
+## How to drop this into the existing repo
 
-- **Emergency** — daily peak wave height / wind / pressure, classified against DMC-derived danger thresholds
-- **Tourism** — daylight-hours beach conditions and a suitability score, for planning a visit
-- **Fisherman** — short-range (48h) forecast conditions for coastal fishing decisions
-
-## Team
-
-- Dilmith Yahathugoda (s16877)
-- Dinusha Priyashan (s16798)
-- Kavindu Perera (s16829)
-
-## Project status
-
-| Layer | Status |
-|---|---|
-| Bronze (raw ingestion) | ✅ Done, validated |
-| Silver (hourly, cleaned) | ✅ Done, validated |
-| Gold (daily aggregates) | ✅ Done, validated |
-| Forecasts (SARIMA output) | 🔲 Not started |
-| Dashboard | 🔲 Planned, not built |
-
-## Architecture
-
-Medallion architecture on top of Supabase (PostgreSQL):
-
-```
-Open-Meteo APIs (Marine, Historical Weather, Air Quality, Forecast)
-        │
-        ▼
-   Bronze  (raw JSON per location/month, purged after Silver write)
-        │
-        ▼
-   Silver  (silver_hourly — one row per location per hour, all sources joined)
-        │
-        ├──────────────────────┬─────────────────────┐
-        ▼                      ▼                      ▼
-  gold_emergency_daily   gold_tourism_daily      (Fisherman reads
-  (daily MAX + DMC        (daylight-hours MEAN     silver_hourly
-   classification)         + suitability score)     directly — no
-                                                      Gold table)
-```
-
-Gold is intentionally split into two tables rather than one wide table, since Emergency and Tourism aggregate over genuinely different time windows (24h max vs. 06:00–18:00 mean).
-
-## Data sources
-
-Open-Meteo's free APIs: Marine (waves, swell, ocean current, sea surface temperature), Historical Weather (wind, precipitation, pressure), Air Quality (UV index, PM2.5), and Forecast (planned, for Fisherman mode).
-
-## Locations
-
-15 coastal locations across Sri Lanka. 5 are Tourism-only and skip the marine ocean current/temperature fetch (they don't need it and it reduces API load); the remaining 10 fetch the full data set.
-
-Full list and coordinates live in `pipeline/fetch_data.py`'s `LOCATIONS` and `TOURISM_ONLY` — treated as the single source of truth across the whole pipeline, not duplicated elsewhere.
-
-## Repository structure
+Your project folder is `Big Data Analytics/` with `pipeline/` and
+`validation_scripts/` already in it. Add these new files at the project
+root, alongside `pipeline/`:
 
 ```
 Big Data Analytics/
-├── pipeline/
-│   ├── fetch_data.py         # Bronze → Silver ingestion pipeline
-│   └── build_gold.py         # Silver → Gold aggregation
-├── validation_scripts/
-│   └── validate_gold.py      # Gold layer validation & report generation
-├── spotcheck_trincomalee.py  # One-off spot-check against live Open-Meteo data
-├── .env                      # Supabase credentials (not committed — see below)
-├── .gitignore
-└── README.md
+├── .env                      (already exists)
+├── pipeline/                 (already exists)
+│   ├── fetch_data.py
+│   └── build_gold.py
+├── validation_scripts/       (already exists)
+│   └── validate_gold.py
+├── data_access.py            <- NEW
+├── app.py                    <- NEW
+├── requirements.txt          <- NEW
+└── pages/                    <- NEW
+    ├── emergency.py
+    ├── tourism.py
+    └── fisherman.py
 ```
 
-## Setup
+## Before running
 
-### Requirements
+1. `pip install -r requirements.txt`
+2. Confirm `.env` has `SUPABASE_URL` and `SUPABASE_KEY` (the REST API key —
+   `data_access.py` never touches `SUPABASE_DB_URL`, that's only for
+   `build_gold.py`'s direct psycopg2/DDL work).
+3. **Check column names against your actual Gold tables.** I inferred
+   `wave_height_max`, `wind_speed_max`, `atmospheric_pressure_max`,
+   `classification` for `gold_emergency_daily`, and `wave_height_mean`,
+   `wind_speed_mean`, `sea_surface_temp_mean`, `suitability_score` for
+   `gold_tourism_daily` from the handoff's description of the aggregation
+   logic — I don't have `build_gold.py`'s actual `SELECT`/column-alias
+   output, so these names may not match exactly. If a page errors on
+   `KeyError`, that's almost certainly the fix needed (check
+   `information_schema.columns` the same way you did for `silver_hourly`).
+4. **`LOCATION_COORDS` in `pages/emergency.py` are placeholder
+   coordinates I filled in from general knowledge, not from your pipeline.**
+   Replace with the real lat/lon your `fetch_data.py` uses per location
+   (it must have them already, since it calls the Open-Meteo APIs) before
+   trusting the map.
+5. Run: `python app.py`, open `http://127.0.0.1:8050`.
 
-```
-pip install requests supabase python-dotenv psycopg2-binary pandas
-```
+## What's deliberately NOT done yet (per the plan, not an oversight)
 
-### Environment variables
+- **Flask-Caching** (Step 6) — `data_access.py` has a `cache_stub` no-op
+  decorator ready to swap for real memoization once the app is stable.
+- **Fisherman's real data** — `get_fisherman_forecast()` returns clearly
+  labeled mock data (`is_mocked: True`) until SARIMA + the `Forecasts`
+  table exist. The page banner and mock flag are intentional, not bugs.
+- **Emergency location scoping** — the map/data currently default to all
+  15 locations, per the current safe default in `build_gold.py`. If the
+  team resolves the open scoping question, filter in `get_emergency_data()`
+  in one place, not per-page.
+- **Deployment secrets** (Step 7) — untouched, still using local `.env`.
 
-Create a `.env` file in the project root (never commit this file):
+## Suggested order to actually test this
 
-```
-SUPABASE_URL=https://<your-project-ref>.supabase.co
-SUPABASE_KEY=<service_role key>
-SUPABASE_DB_URL=postgresql://postgres:<password>@db.<your-project-ref>.supabase.co:5432/postgres
-```
-
-- `SUPABASE_URL` / `SUPABASE_KEY` — Project Settings → API in the Supabase dashboard. Use the `service_role` key for pipeline scripts (server-side, not exposed to any client).
-- `SUPABASE_DB_URL` — Project Settings → Database → Connection string → URI. Needed for direct `psycopg2` access (schema DDL, raw queries) that the REST client can't do.
-
-Make sure `.env` is listed in `.gitignore` before your first commit.
-
-## Running the pipeline
-
-```
-python pipeline/fetch_data.py
-```
-Fetches all configured locations and date ranges, writes to Bronze, transforms into Silver, purges Bronze on success. Safe to re-run — skips date ranges already covered in Silver.
-
-```
-python pipeline/build_gold.py
-```
-Aggregates Silver into the two Gold tables. Safe to re-run — upserts on `(location_name, date)`, never duplicates.
-
-```
-python validation_scripts/validate_gold.py
-```
-Runs a full validation pass over both Gold tables (coverage, duplicates, plausibility ranges, classification consistency, null patterns) and writes `validation_report_gold.md`.
-
-## Known limitations
-
-- `sea_level_height` is not populated — no tide/storm-surge endpoint currently wired up. Emergency mode's danger classification is wave-height-based only and does not capture tidal flood risk.
-- `sea_surface_temp` is unavailable by design for the 5 Tourism-only locations (no marine ocean fetch), plus one shared 12-day gap (Jan 30 – Feb 11, 2025) across the other 10 locations, likely a temporary upstream gap in Open-Meteo's marine reanalysis archive.
-- The Emergency danger thresholds (Safe/Caution/Dangerous) are reconstructed from Sri Lankan DoM advisory language, not an official published table.
-- Tourism's suitability score is a first-draft formula, not a specified or validated metric.
-- 2024 data backfill is deliberately parked pending confirmed storage headroom against Supabase's free-tier cap.
-
-## Roadmap
-
-1. Analytical models — SARIMA (Fisherman), additive decomposition (Tourism), tree-ensemble (Emergency)
-2. Forecasts table for SARIMA output
-3. Dashboard (Dash/Plotly) — Emergency and Tourism modes first, Fisherman mode once forecasts exist
-4. 2024 backfill, once storage is reconfirmed
+1. Run `app.py` and see if the Emergency page loads with your real data —
+   this will surface any column-name mismatches immediately (see #3 above).
+2. Fix column names in `pages/emergency.py` and `data_access.py` together.
+3. Move to Tourism, same process.
+4. Fisherman page should "just work" against the mock — no real data
+   dependency to fix there yet.
