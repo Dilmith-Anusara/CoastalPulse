@@ -2,32 +2,44 @@
 CoastalPulse
 Coastal Intelligence & Decision Support Platform
 
-Main application shell.
+Main application shell — restyled to the approved design direction
+(navy masthead, paper content, Source Serif 4 / IBM Plex Sans / IBM Plex
+Mono), replacing the earlier generic SaaS-dashboard look.
 
-Routes (fixed to match the nav — IMPORTANT for the pages step):
-    /            -> pages/overview.py     (not built yet)
-    /emergency   -> pages/emergency.py    (must register path="/emergency", NOT "/")
+Routes:
+    /            -> pages/overview.py    (supplies its own hero — see below)
+    /emergency   -> pages/emergency.py   (must register path="/emergency")
     /tourism     -> pages/tourism.py
     /fisherman   -> pages/fisherman.py
 
-This app.py owns two contracts every page must honor:
+Two contracts every page must still honor (unchanged from before):
 
-1. ROUTING — see above. If a page registers the wrong path, the nav will
-   look right but clicking it will 404 or land on the wrong content.
+1. ROUTING — a page registering the wrong path will 404 or collide with
+   another page even though the nav looks right.
 
-2. VERDICT / DETAIL SPLIT — the audience is tourists, residents, and
-   fishermen, not statisticians. Nobody opening this at 5am wants to read
-   a wave-height line chart against a dashed threshold line; they want
-   "Go" or "Don't go, waves 2.8m." So every page's layout must put:
-     - the plain-language status card / recommendation in a container
-       with className="cp-verdict-zone" (ALWAYS visible)
-     - charts, trends, and anything requiring interpretation in a
-       container with className="cp-detail-zone" (hidden by default,
-       revealed by the "Show details" switch in the header)
-   This is enforced with a single CSS rule keyed off the app-root class,
-   not per-page callbacks — so no page needs to reimplement show/hide
-   logic, and it can't drift out of sync across pages the way the
-   location lists did in the pipeline.
+2. VERDICT / DETAIL SPLIT — plain-language status goes in a container
+   with className="cp-verdict-zone" (always visible); charts/trends go
+   in className="cp-detail-zone" (hidden until the header's "Show
+   details" switch is on). One CSS rule keyed off the app-root class
+   controls this everywhere — no per-page show/hide logic.
+
+NOTE on scope: only app.py and pages/overview.py have been restyled to
+the new design direction so far. Emergency, Tourism, and Fisherman still
+use the older look — they'll need the same treatment for the whole app
+to feel consistent. The badge colors used here (Safe/Caution/Dangerous,
+suitability bands) intentionally still come from page_helpers.py
+unchanged, so Overview's colors match Emergency/Tourism's *meaning*
+exactly even though the visual chrome around them hasn't caught up yet.
+
+DESIGN PASS (this revision): fixed a handful of visual issues that
+survived the initial restyle — dead hover state on audience rows, no
+keyboard focus states anywhere, badge text contrast not guaranteed
+against arbitrary classification colors, hero graphic potentially
+colliding with hero copy at tablet widths, and hard-coded ALL-CAPS
+strings in Python instead of letting CSS own that styling decision
+(text-transform), which also keeps the underlying content sentence-case
+for anything that reads the raw string (e.g. screen readers navigating
+by text, or logging). No structural/behavioral changes.
 """
 
 import dash
@@ -63,40 +75,49 @@ app.index_string = """
     {%favicon%}
     {%css%}
 
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link
-        rel="preconnect"
-        href="https://fonts.googleapis.com"
-    >
-    <link
-        rel="preconnect"
-        href="https://fonts.gstatic.com"
-        crossorigin
-    >
-    <link
-        href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap"
+        href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap"
         rel="stylesheet"
     >
 
     <style>
 
         /* ==================================================
-           RESET
+           PALETTE / RESET
+
+           Deep tide navy + chart-paper cream, ocean teal accent,
+           warning coral — replaces the earlier generic cool-grey
+           SaaS palette. See design_mockup/overview_direction.html
+           for the approved reference.
         ================================================== */
+
+        :root {
+            --navy: #0C2B3A;
+            --paper: #F7F1E4;
+            --paper-line: #E4DAC4;
+            --teal: #1E7F82;
+            --teal-deep: #145558;
+            --coral: #D9622A;
+            --slate: #3A5A63;
+            --ink: #16262C;
+        }
 
         * {
             box-sizing: border-box;
         }
 
         html {
-            background: #f4f7f8;
+            background: var(--paper);
         }
 
         body {
             margin: 0;
             padding: 0;
-            background: #f4f7f8;
-            color: #10212b;
-            font-family: "DM Sans", Arial, sans-serif;
+            background: var(--paper);
+            color: var(--ink);
+            font-family: "IBM Plex Sans", Arial, sans-serif;
         }
 
         a {
@@ -110,6 +131,38 @@ app.index_string = """
             font-family: inherit;
         }
 
+        h1, h2, h3 {
+            font-family: "Source Serif 4", serif;
+            font-weight: 500;
+        }
+
+
+        /* ==================================================
+           FOCUS STATES (app-wide)
+
+           Nothing in the previous pass had a visible focus ring —
+           nav links, the detail switch, the location dropdown all
+           went silent on keyboard focus. Coral matches the brand
+           mark / hero position-dot, so it reads as "here" rather
+           than a generic browser blue.
+        ================================================== */
+
+        a:focus-visible,
+        .cp-nav-link:focus-visible {
+            outline: 2px solid var(--coral);
+            outline-offset: 3px;
+            border-radius: 2px;
+        }
+
+        .cp-switch:focus-visible {
+            outline: 2px solid var(--coral);
+            outline-offset: 3px;
+        }
+
+        .cp-location-dropdown .Select-control:focus-within {
+            border-bottom-color: var(--coral) !important;
+        }
+
 
         /* ==================================================
            APP
@@ -117,25 +170,26 @@ app.index_string = """
 
         .cp-app {
             min-height: 100vh;
-            background: #f4f7f8;
+            background: var(--paper);
         }
 
 
         /* ==================================================
-           HEADER
+           HEADER (masthead — navy, matches the hero below it
+           on Overview so the two form one continuous dark
+           zone rather than two disconnected bars)
         ================================================== */
 
         .cp-header {
-            height: 76px;
             width: 100%;
-            background: #ffffff;
-            border-bottom: 1px solid #dce5e9;
+            background: var(--navy);
+            border-bottom: 1px solid rgba(255,255,255,0.1);
 
             display: flex;
             align-items: center;
             justify-content: space-between;
 
-            padding: 0 38px;
+            padding: 16px 42px;
 
             position: sticky;
             top: 0;
@@ -150,42 +204,20 @@ app.index_string = """
         .cp-brand {
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 8px;
+
+            font-family: "Source Serif 4", serif;
+            font-weight: 600;
+            font-size: 17px;
+            color: var(--paper);
         }
 
         .cp-brand-mark {
-            width: 34px;
-            height: 34px;
-
+            width: 6px;
+            height: 6px;
             border-radius: 50%;
-
-            background: #062b3a;
-
-            display: flex;
-            align-items: center;
-            justify-content: center;
-
-            color: #22c7df;
-            font-size: 17px;
-            font-weight: 700;
-        }
-
-        .cp-brand-name {
-            font-family: "Space Grotesk", sans-serif;
-            font-size: 19px;
-            font-weight: 700;
-            letter-spacing: -0.5px;
-            color: #09212c;
-        }
-
-        .cp-brand-subtitle {
-            margin-top: 1px;
-
-            font-size: 8px;
-            font-weight: 700;
-            letter-spacing: 1.8px;
-
-            color: #81939d;
+            background: var(--coral);
+            display: inline-block;
         }
 
 
@@ -194,54 +226,30 @@ app.index_string = """
         ================================================== */
 
         .cp-navigation {
-            position: absolute;
-            left: 50%;
-            transform: translateX(-50%);
-
             display: flex;
             align-items: center;
-            gap: 5px;
+            gap: 30px;
         }
 
         .cp-nav-link {
-            position: relative;
-
-            padding: 9px 15px;
-
-            color: #70818b;
-
             font-size: 13px;
-            font-weight: 600;
+            font-weight: 500;
+            color: #8FB8BA;
 
-            border-radius: 7px;
+            padding-bottom: 4px;
+            border-bottom: 2px solid transparent;
 
-            transition:
-                color 0.15s ease,
-                background 0.15s ease;
+            transition: color 0.15s ease, border-color 0.15s ease;
         }
 
         .cp-nav-link:hover {
-            color: #092b3a;
-            background: #f0f5f6;
+            color: var(--paper);
         }
 
         .cp-nav-link.active {
-            color: #062b3a;
-            background: #edf8fa;
-        }
-
-        .cp-nav-link.active::after {
-            content: "";
-
-            position: absolute;
-            left: 15px;
-            right: 15px;
-            bottom: -13px;
-
-            height: 2px;
-
-            background: #11b6d1;
-            border-radius: 2px;
+            color: var(--paper);
+            font-weight: 600;
+            border-bottom-color: var(--teal);
         }
 
 
@@ -252,63 +260,36 @@ app.index_string = """
         .cp-header-right {
             display: flex;
             align-items: center;
-            gap: 22px;
+            gap: 24px;
         }
 
 
         /* ==================================================
-           FRESHNESS BADGE
-           (replaces the old decorative "LIVE" dot — this is a
-           scheduled batch pipeline, not a live stream, so the
-           badge says how stale the data actually is)
+           FRESHNESS INDICATOR
+           A dot + mono readout, not a boxed pill — matches the
+           understated masthead style. Only the dot color carries
+           meaning (fresh/stale/unknown); text stays neutral.
         ================================================== */
 
         .cp-freshness {
             display: flex;
             align-items: center;
-            gap: 7px;
+            gap: 6px;
 
-            font-size: 10px;
-            font-weight: 700;
-            letter-spacing: 0.7px;
-
-            padding: 6px 10px;
-            border-radius: 5px;
+            font-family: "IBM Plex Mono", monospace;
+            font-size: 11px;
+            color: #C9D6D4;
         }
 
         .cp-freshness-dot {
-            width: 7px;
-            height: 7px;
+            width: 6px;
+            height: 6px;
             border-radius: 50%;
         }
 
-        .cp-freshness-fresh {
-            color: #13734a;
-            background: #edf8f2;
-        }
-
-        .cp-freshness-fresh .cp-freshness-dot {
-            background: #16a765;
-            box-shadow: 0 0 0 4px rgba(22, 167, 101, 0.10);
-        }
-
-        .cp-freshness-stale {
-            color: #986000;
-            background: #fff6e5;
-        }
-
-        .cp-freshness-stale .cp-freshness-dot {
-            background: #e89a13;
-        }
-
-        .cp-freshness-unknown {
-            color: #7a8b94;
-            background: #f0f3f4;
-        }
-
-        .cp-freshness-unknown .cp-freshness-dot {
-            background: #aab8be;
-        }
+        .cp-freshness-fresh .cp-freshness-dot { background: #4FAE7C; }
+        .cp-freshness-stale .cp-freshness-dot { background: #E0A458; }
+        .cp-freshness-unknown .cp-freshness-dot { background: #7A96A0; }
 
 
         /* ==================================================
@@ -323,21 +304,22 @@ app.index_string = """
 
         .cp-detail-toggle-label {
             font-size: 10px;
-            font-weight: 700;
-            letter-spacing: 0.6px;
-            color: #70818b;
+            font-weight: 600;
+            letter-spacing: 0.4px;
+            text-transform: uppercase;
+            color: #8FB8BA;
         }
 
         .cp-switch {
             position: relative;
 
-            width: 36px;
-            height: 20px;
+            width: 34px;
+            height: 18px;
 
             border: none;
             border-radius: 999px;
 
-            background: #cbd8dd;
+            background: rgba(255,255,255,0.22);
 
             cursor: pointer;
             padding: 0;
@@ -346,7 +328,7 @@ app.index_string = """
         }
 
         .cp-switch.on {
-            background: #11b6d1;
+            background: var(--teal);
         }
 
         .cp-switch::after {
@@ -356,15 +338,13 @@ app.index_string = """
             top: 2px;
             left: 2px;
 
-            width: 16px;
-            height: 16px;
+            width: 14px;
+            height: 14px;
 
             border-radius: 50%;
             background: #ffffff;
 
             transition: left 0.15s ease;
-
-            box-shadow: 0 1px 2px rgba(9, 35, 47, 0.25);
         }
 
         .cp-switch.on::after {
@@ -373,129 +353,102 @@ app.index_string = """
 
 
         /* ==================================================
-           LOCATION
+           LOCATION SELECTOR
+           dcc.Dropdown's internals (react-select) restyled to a
+           bare underlined control matching the masthead — not a
+           bordered box. The flyout menu stays light for legibility
+           regardless of the dark header.
         ================================================== */
 
-        .cp-location {
-            display: flex;
-            flex-direction: column;
-            gap: 3px;
-        }
-
-        .cp-location-label {
-            font-size: 8px;
-            font-weight: 700;
-            letter-spacing: 1.1px;
-            color: #83949d;
-        }
-
         .cp-location-dropdown {
-            min-width: 190px;
+            min-width: 160px;
         }
 
         .cp-location-dropdown .Select-control {
-            min-height: 34px !important;
-
-            border: 1px solid #cbd8dd !important;
-            border-radius: 6px !important;
-
+            min-height: 30px !important;
+            border: none !important;
+            border-bottom: 1px solid rgba(255,255,255,0.4) !important;
+            border-radius: 0 !important;
             box-shadow: none !important;
-
-            background: #ffffff !important;
+            background: transparent !important;
         }
 
         .cp-location-dropdown .Select-placeholder,
         .cp-location-dropdown .Select-value-label {
-            color: #24343d !important;
-            font-size: 12px !important;
+            color: var(--paper) !important;
+            font-size: 13px !important;
+            font-weight: 600 !important;
         }
 
         .cp-location-dropdown .Select-menu-outer {
-            border: 1px solid #d4e0e4 !important;
-            box-shadow: 0 8px 24px rgba(11, 37, 49, 0.10) !important;
+            background: var(--paper) !important;
+            border: 1px solid var(--paper-line) !important;
+            box-shadow: 0 8px 20px rgba(11,37,49,0.18) !important;
             z-index: 2000 !important;
+        }
+
+        .cp-location-dropdown .Select-option {
+            color: var(--ink) !important;
+            font-size: 13px !important;
         }
 
 
         /* ==================================================
-           PAGE
+           PAGE INTRO (kicker / title / description)
+           Restyled to the new palette. Hidden entirely on
+           Overview ("/"), which supplies its own hero instead —
+           see update_page_context below.
         ================================================== */
 
         .cp-page {
             width: 100%;
-            max-width: 1540px;
-
+            max-width: 1400px;
             margin: 0 auto;
-
-            padding: 34px 42px 60px;
+            padding: 0 0 60px;
         }
-
-
-        /* ==================================================
-           PAGE INTRO
-        ================================================== */
 
         .cp-page-intro {
             display: flex;
             align-items: flex-end;
             justify-content: space-between;
 
-            margin-bottom: 28px;
+            padding: 30px 42px 0;
+            margin-bottom: 20px;
         }
 
         .cp-page-kicker {
-            font-size: 10px;
-            font-weight: 700;
-            letter-spacing: 1.5px;
-
-            color: #1594aa;
-
-            margin-bottom: 7px;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.4px;
+            text-transform: uppercase;
+            color: var(--teal-deep);
+            margin-bottom: 6px;
         }
 
         .cp-page-title {
             margin: 0;
-
-            font-family: "Space Grotesk", sans-serif;
-
-            font-size: 30px;
-            line-height: 1.1;
-            font-weight: 600;
-
-            letter-spacing: -1px;
-
-            color: #0b202a;
+            font-size: 26px;
+            color: var(--navy);
         }
 
         .cp-page-description {
-            margin-top: 7px;
-
-            color: #72838c;
-
+            margin-top: 6px;
+            color: var(--slate);
             font-size: 13px;
         }
-
-
-        /* ==================================================
-           GLOBAL DATA CONTEXT
-        ================================================== */
 
         .cp-context {
             display: flex;
             align-items: center;
-            gap: 12px;
-
-            color: #788991;
-
+            gap: 10px;
+            color: var(--slate);
             font-size: 11px;
         }
 
         .cp-context-divider {
             width: 3px;
             height: 3px;
-
-            background: #aab8be;
-
+            background: #B9AE94;
             border-radius: 50%;
         }
 
@@ -506,17 +459,12 @@ app.index_string = """
 
         .cp-content {
             width: 100%;
+            padding: 0 42px;
         }
 
 
         /* ==================================================
-           VERDICT / DETAIL ZONES
-
-           Every page puts its plain-language status card in
-           cp-verdict-zone (always shown) and its charts in
-           cp-detail-zone (hidden until the header switch is on).
-           Toggling one class here controls every page — no
-           per-page show/hide logic needed.
+           VERDICT / DETAIL ZONES (unchanged mechanism)
         ================================================== */
 
         .cp-verdict-zone {
@@ -531,163 +479,252 @@ app.index_string = """
             display: block;
         }
 
+        /* Divider between stacked sections inside a verdict zone
+           (e.g. Overview's audience list -> snapshot table) so the
+           page reads as distinct plates instead of one continuous
+           scroll of paper-on-paper. */
+        .cp-verdict-zone .cp-section + .cp-section,
+        .cp-verdict-zone .cp-section {
+            border-top: 1px solid var(--paper-line);
+        }
+
+        .cp-verdict-zone > .cp-section:first-child {
+            border-top: none;
+        }
+
 
         /* ==================================================
-           GENERAL CARDS
+           SHARED CARD (still used by Emergency/Tourism until
+           they're restyled — Overview uses its own classes below)
         ================================================== */
 
         .cp-card {
             background: #ffffff;
-
-            border: 1px solid #dce5e9;
+            border: 1px solid var(--paper-line);
             border-radius: 8px;
-
-            box-shadow:
-                0 1px 2px rgba(9, 35, 47, 0.025);
         }
 
 
         /* ==================================================
-           KPI / METRIC STYLE
+           OVERVIEW: HERO
         ================================================== */
 
-        .cp-metric {
-            padding: 20px 22px;
+        .cp-hero {
+            background: var(--navy);
+            color: var(--paper);
+            padding: 40px 42px 36px;
+            position: relative;
+            overflow: hidden;
         }
 
-        .cp-metric-label {
-            font-size: 9px;
-            font-weight: 700;
-            letter-spacing: 1.2px;
-
-            color: #7a8b94;
-
-            margin-bottom: 9px;
+        .cp-hero-inner {
+            max-width: 560px;
+            position: relative;
+            z-index: 2;
         }
 
-        .cp-metric-value {
-            font-family: "Space Grotesk", sans-serif;
-
-            font-size: 28px;
-            line-height: 1;
-
-            font-weight: 600;
-
-            color: #0a2530;
-        }
-
-        .cp-metric-unit {
-            margin-left: 4px;
-
+        .cp-hero-kicker {
             font-size: 12px;
-            font-weight: 500;
-
-            color: #7a8b94;
+            letter-spacing: 0.4px;
+            text-transform: uppercase;
+            color: #8FB8BA;
+            margin-bottom: 14px;
         }
 
-        .cp-metric-note {
-            margin-top: 9px;
+        .cp-hero h1 {
+            font-size: 34px;
+            line-height: 1.15;
+            margin: 0 0 16px 0;
+            color: var(--paper);
+        }
 
-            font-size: 10px;
-            color: #8a9aa2;
+        .cp-hero p {
+            font-size: 14.5px;
+            line-height: 1.65;
+            color: #C9D6D4;
+            margin: 0;
+            font-family: "IBM Plex Sans", sans-serif;
+        }
+
+        .cp-hero-graphic {
+            position: absolute;
+            right: 0;
+            top: 0;
+            bottom: 0;
+            width: 50%;
+            /* Fade the graphic in from the right rather than hard-edging
+               it against the hero copy — at tablet widths (650-1000px)
+               the two were close enough to visually collide. */
+            -webkit-mask-image: linear-gradient(to right, transparent, black 22%);
+            mask-image: linear-gradient(to right, transparent, black 22%);
+        }
+
+        .cp-stat-strip {
+            display: flex;
+            border-top: 1px solid rgba(255,255,255,0.15);
+            margin-top: 32px;
+            padding-top: 22px;
+            max-width: 560px;
+            position: relative;
+            z-index: 2;
+        }
+
+        .cp-stat { flex: 1; }
+
+        .cp-stat-num {
+            font-family: "IBM Plex Mono", monospace;
+            font-size: 22px;
+            font-weight: 500;
+            color: var(--paper);
+            letter-spacing: -0.02em;
+            line-height: 1;
+        }
+
+        .cp-stat-label {
+            font-size: 11px;
+            color: #9CB9B8;
+            margin-top: 6px;
+            line-height: 1.3;
         }
 
 
         /* ==================================================
-           SECTION HEADERS
+           OVERVIEW: AUDIENCE LIST (asymmetric legend rows,
+           not a uniform SaaS card grid)
         ================================================== */
 
-        .cp-section-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-
-            margin-bottom: 13px;
+        .cp-section {
+            padding: 36px 0;
         }
 
         .cp-section-title {
-            font-family: "Space Grotesk", sans-serif;
-
-            font-size: 15px;
-            font-weight: 600;
-
-            color: #102a35;
+            font-size: 18px;
+            margin: 0 0 4px 0;
+            color: var(--navy);
         }
 
-        .cp-section-meta {
-            font-size: 10px;
-            color: #82929a;
+        .cp-section-sub {
+            font-size: 13px;
+            color: var(--slate);
+            margin: 0 0 20px 0;
         }
 
-
-        /* ==================================================
-           STATUS
-        ================================================== */
-
-        .cp-status {
-            display: inline-flex;
-            align-items: center;
-            gap: 7px;
-
-            padding: 7px 10px;
-
-            border-radius: 5px;
-
-            font-size: 10px;
-            font-weight: 700;
-            letter-spacing: 0.6px;
+        .cp-audience-list {
+            border-top: 1px solid var(--navy);
         }
 
-        .cp-status-dot {
-            width: 6px;
-            height: 6px;
+        .cp-audience-row {
+            display: grid;
+            grid-template-columns: 150px 1fr;
+            gap: 28px;
+            align-items: baseline;
 
-            border-radius: 50%;
+            padding: 18px 12px;
+            margin-left: -12px;
+            border-bottom: 1px solid var(--paper-line);
+            border-left: 3px solid transparent;
+
+            color: var(--ink);
+
+            transition: background 0.12s ease, border-left-color 0.12s ease;
         }
 
-        .cp-status-normal {
-            color: #13734a;
-            background: #edf8f2;
+        .cp-audience-row:hover {
+            background: #EFE7D4;
+            border-left-color: var(--teal);
         }
 
-        .cp-status-normal .cp-status-dot {
-            background: #18a765;
+        a:focus-visible > .cp-audience-row {
+            background: #EFE7D4;
+            border-left-color: var(--teal);
+            outline: none;
         }
 
-        .cp-status-caution {
-            color: #986000;
-            background: #fff6e5;
-        }
-
-        .cp-status-caution .cp-status-dot {
-            background: #e89a13;
-        }
-
-        .cp-status-danger {
-            color: #a52828;
-            background: #fff0f0;
-        }
-
-        .cp-status-danger .cp-status-dot {
-            background: #dc4040;
-        }
-
-
-        /* ==================================================
-           ERROR MESSAGE
-        ================================================== */
-
-        .cp-error {
-            padding: 18px 20px;
-
-            border: 1px solid #f0caca;
-            border-radius: 7px;
-
-            background: #fff8f8;
-
-            color: #a33232;
-
+        .cp-audience-tag {
             font-size: 12px;
+            font-weight: 600;
+            color: var(--slate);
+        }
+
+        .cp-audience-row h3 {
+            font-size: 16px;
+            margin: 0;
+            display: block;
+        }
+
+        .cp-audience-row p {
+            font-size: 13px;
+            color: var(--slate);
+            line-height: 1.5;
+            margin: 4px 0 0 0;
+        }
+
+
+        /* ==================================================
+           OVERVIEW: SNAPSHOT (tide-table style — dense rows,
+           mono numerals — for the ONE selected location; this is
+           deliberately not a multi-location table, since every
+           Gold table here is location-wise and this section
+           should not read as a Sri-Lanka-wide summary)
+        ================================================== */
+
+        .cp-snapshot-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-bottom: 4px;
+        }
+
+        .cp-snapshot-scope {
+            font-size: 11px;
+            color: #9AA8A6;
+        }
+
+        table.cp-tide {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 8px;
+            font-size: 13.5px;
+        }
+
+        table.cp-tide thead th {
+            text-align: left;
+            font-weight: 600;
+            font-size: 11px;
+            color: var(--slate);
+            padding: 0 14px 10px 0;
+            border-bottom: 1px solid var(--navy);
+        }
+
+        table.cp-tide tbody td {
+            padding: 13px 14px 13px 0;
+            border-bottom: 1px solid var(--paper-line);
+            vertical-align: middle;
+        }
+
+        .cp-badge {
+            display: inline-block;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 3px 9px;
+            border-radius: 2px;
+            color: white;
+            /* Badge colors come from CLASSIFICATION_COLORS / score_band(),
+               which can land on lighter hexes (e.g. a caution amber) where
+               flat white text loses contrast. A subtle text-shadow plus an
+               inset ring keeps every badge legible without having to
+               special-case individual colors. */
+            text-shadow: 0 1px 1px rgba(0,0,0,0.25);
+            box-shadow: inset 0 0 0 1px rgba(0,0,0,0.08);
+        }
+
+        .cp-mono {
+            font-family: "IBM Plex Mono", monospace;
+        }
+
+        .cp-note-muted {
+            font-size: 11.5px;
+            color: #8A9AA2;
         }
 
 
@@ -696,79 +733,26 @@ app.index_string = """
         ================================================== */
 
         @media (max-width: 1000px) {
-
-            .cp-navigation {
-                position: static;
-                transform: none;
-            }
-
             .cp-header {
-                height: auto;
-                min-height: 76px;
-
                 flex-wrap: wrap;
-
-                gap: 15px;
-
-                padding: 15px 25px;
+                gap: 14px;
+                padding: 14px 22px;
             }
-
             .cp-navigation {
                 order: 3;
-
                 width: 100%;
-
-                justify-content: center;
+                overflow-x: auto;
             }
-
-            .cp-nav-link.active::after {
-                bottom: -5px;
-            }
-
-            .cp-page {
-                padding: 28px 25px 50px;
+            .cp-page-intro, .cp-hero, .cp-section, .cp-content {
+                padding-left: 22px;
+                padding-right: 22px;
             }
         }
 
-
         @media (max-width: 650px) {
-
-            .cp-header {
-                padding: 14px 17px;
-            }
-
-            .cp-brand-subtitle {
-                display: none;
-            }
-
-            .cp-header-right {
-                gap: 10px;
-            }
-
-            .cp-detail-toggle-label {
-                display: none;
-            }
-
-            .cp-location-dropdown {
-                min-width: 145px;
-            }
-
-            .cp-page {
-                padding: 24px 17px 40px;
-            }
-
-            .cp-page-title {
-                font-size: 25px;
-            }
-
-            .cp-navigation {
-                overflow-x: auto;
-                justify-content: flex-start;
-            }
-
-            .cp-nav-link {
-                white-space: nowrap;
-            }
+            .cp-detail-toggle-label { display: none; }
+            .cp-hero-graphic { display: none; }
+            .cp-audience-row { grid-template-columns: 1fr; gap: 4px; }
         }
 
     </style>
@@ -776,7 +760,6 @@ app.index_string = """
 
 <body>
     {%app_entry%}
-
     <footer>
         {%config%}
         {%scripts%}
@@ -792,17 +775,7 @@ app.index_string = """
 # ============================================================
 
 def nav_link(label, href, page_id):
-    """
-    Create one navigation item.
-
-    Active state is handled dynamically using the current URL.
-    """
-    return dcc.Link(
-        label,
-        href=href,
-        id=f"nav-{page_id}",
-        className="cp-nav-link",
-    )
+    return dcc.Link(label, href=href, id=f"nav-{page_id}", className="cp-nav-link")
 
 
 navigation = html.Nav(
@@ -817,46 +790,25 @@ navigation = html.Nav(
 
 
 # ============================================================
-# BRAND
+# BRAND — simplified to match the mockup: a coral dot (the same
+# "position marker" motif used on the hero's chart graphic and,
+# later, the map) plus the serif wordmark. Dropped the old
+# circular avatar mark + subtitle line, which the mockup doesn't
+# use.
 # ============================================================
 
 brand = html.Div(
     [
-        html.Div(
-            "◒",
-            className="cp-brand-mark",
-        ),
-
-        html.Div(
-            [
-                html.Div(
-                    "CoastalPulse",
-                    className="cp-brand-name",
-                ),
-
-                html.Div(
-                    "COASTAL INTELLIGENCE",
-                    className="cp-brand-subtitle",
-                ),
-            ]
-        ),
+        html.Span(className="cp-brand-mark"),
+        html.Span("CoastalPulse"),
     ],
     className="cp-brand",
 )
 
 
 # ============================================================
-# FRESHNESS BADGE (replaces the fake "LIVE" dot)
+# FRESHNESS INDICATOR
 # ============================================================
-#
-# This is a scheduled batch pipeline (Bronze -> Silver -> Gold), not a
-# real-time feed. A pulsing "LIVE" dot next to data that's actually hours
-# or a day old will erode trust the moment someone checks a timestamp.
-# This badge shows how stale the data genuinely is, using the real
-# MAX(inserted_at) from silver_hourly via data_access.get_last_updated().
-#
-# It refreshes on an interval rather than only at page load, so leaving
-# the tab open doesn't show an increasingly wrong "just now".
 
 freshness_badge = html.Div(
     [
@@ -869,7 +821,7 @@ freshness_badge = html.Div(
 
 freshness_interval = dcc.Interval(
     id="freshness-interval",
-    interval=5 * 60 * 1000,  # 5 minutes — matches the planned cache TTL
+    interval=5 * 60 * 1000,
     n_intervals=0,
 )
 
@@ -877,18 +829,12 @@ freshness_interval = dcc.Interval(
 # ============================================================
 # DETAIL TOGGLE
 # ============================================================
-#
-# Default OFF: every page opens showing only its plain-language verdict
-# (status card / recommendation). Switching this on reveals the
-# cp-detail-zone containers — charts, trends, comparisons — for the
-# smaller audience that wants to dig in (a resident tracking a storm,
-# a fisherman planning several days out).
 
 detail_mode_store = dcc.Store(id="detail-mode", storage_type="session", data=False)
 
 detail_toggle = html.Div(
     [
-        html.Span("SHOW DETAILS", className="cp-detail-toggle-label"),
+        html.Span("Show details", className="cp-detail-toggle-label"),
         html.Button(id="detail-toggle-btn", className="cp-switch", n_clicks=0),
     ],
     className="cp-detail-toggle",
@@ -899,37 +845,14 @@ detail_toggle = html.Div(
 # LOCATION SELECTOR
 # ============================================================
 
-location_selector = html.Div(
-    [
-        html.Div(
-            "LOCATION",
-            className="cp-location-label",
-        ),
-
-        dcc.Dropdown(
-            id="location-dropdown",
-
-            options=[
-                {
-                    "label": location,
-                    "value": location,
-                }
-                for location in LOCATIONS
-            ],
-
-            value=LOCATIONS[0] if LOCATIONS else None,
-
-            clearable=False,
-            searchable=True,
-
-            className="cp-location-dropdown",
-
-            style={
-                "width": "190px",
-            },
-        ),
-    ],
-    className="cp-location",
+location_selector = dcc.Dropdown(
+    id="location-dropdown",
+    options=[{"label": loc, "value": loc} for loc in LOCATIONS],
+    value=LOCATIONS[0] if LOCATIONS else None,
+    clearable=False,
+    searchable=True,
+    className="cp-location-dropdown",
+    style={"width": "170px"},
 )
 
 
@@ -940,15 +863,9 @@ location_selector = html.Div(
 header = html.Header(
     [
         brand,
-
         navigation,
-
         html.Div(
-            [
-                freshness_badge,
-                detail_toggle,
-                location_selector,
-            ],
+            [freshness_badge, detail_toggle, location_selector],
             className="cp-header-right",
         ),
     ],
@@ -963,53 +880,33 @@ header = html.Header(
 location_store = dcc.Store(
     id="selected-location",
     storage_type="session",
-
     data=LOCATIONS[0] if LOCATIONS else None,
 )
 
 
 # ============================================================
-# PAGE HEADER
+# PAGE INTRO (hidden on Overview — see update_page_context)
 # ============================================================
 
 page_header = html.Div(
     [
         html.Div(
             [
-                html.Div(
-                    id="page-kicker",
-                    className="cp-page-kicker",
-                ),
-
-                html.H1(
-                    id="page-title",
-                    className="cp-page-title",
-                ),
-
-                html.Div(
-                    id="page-description",
-                    className="cp-page-description",
-                ),
+                html.Div(id="page-kicker", className="cp-page-kicker"),
+                html.H1(id="page-title", className="cp-page-title"),
+                html.Div(id="page-description", className="cp-page-description"),
             ]
         ),
-
         html.Div(
             [
-                html.Span(
-                    id="context-location",
-                ),
-
-                html.Div(
-                    className="cp-context-divider",
-                ),
-
-                html.Span(
-                    id="context-date",
-                ),
+                html.Span(id="context-location"),
+                html.Div(className="cp-context-divider"),
+                html.Span(id="context-date"),
             ],
             className="cp-context",
         ),
     ],
+    id="page-intro",
     className="cp-page-intro",
 )
 
@@ -1020,29 +917,15 @@ page_header = html.Div(
 
 app.layout = html.Div(
     [
-        # Shared state
         location_store,
         detail_mode_store,
         freshness_interval,
-
-        # URL
-        dcc.Location(
-            id="url",
-            refresh=False,
-        ),
-
-        # Application header
+        dcc.Location(id="url", refresh=False),
         header,
-
-        # Main workspace
         html.Main(
             [
                 page_header,
-
-                html.Div(
-                    dash.page_container,
-                    className="cp-content",
-                ),
+                html.Div(dash.page_container, className="cp-content"),
             ],
             className="cp-page",
         ),
@@ -1053,32 +936,16 @@ app.layout = html.Div(
 
 
 # ============================================================
-# LOCATION → SHARED STORE
+# LOCATION → SHARED STORE (one-way only — see prior notes on
+# why a store->dropdown callback here would cause a circular
+# dependency; never re-add one)
 # ============================================================
-#
-# One-way only: the dropdown is the single source of truth, the store is
-# derived from it. A second callback that also wrote back from the store
-# to the dropdown's value used to exist here — that created a cycle
-# (dropdown -> store -> dropdown) which Dash's dependency graph rejects
-# as a "Circular Dependency" error, exactly what you saw.
-#
-# If a future page needs to set the location some other way (e.g.
-# clicking a marker on the Emergency map), have THAT page's callback
-# target Output("location-dropdown", "value") directly — never re-add a
-# callback that writes back to the dropdown from "selected-location",
-# or the cycle returns.
 
 @callback(
     Output("selected-location", "data"),
     Input("location-dropdown", "value"),
 )
 def sync_selected_location(value):
-    """
-    Store the selected location in session storage.
-
-    All pages can access:
-        State("selected-location", "data")
-    """
     return value
 
 
@@ -1119,76 +986,68 @@ def apply_detail_mode(is_on):
     Input("url", "pathname"),
 )
 def update_active_navigation(pathname):
-
     if pathname == "/" or pathname is None:
         current = "overview"
-
     elif pathname.startswith("/emergency"):
         current = "emergency"
-
     elif pathname.startswith("/tourism"):
         current = "tourism"
-
     elif pathname.startswith("/fisherman"):
         current = "fisherman"
-
     else:
         current = "overview"
 
     def cls(name):
-        if name == current:
-            return "cp-nav-link active"
-        return "cp-nav-link"
+        return "cp-nav-link active" if name == current else "cp-nav-link"
 
-    return (
-        cls("overview"),
-        cls("emergency"),
-        cls("tourism"),
-        cls("fisherman"),
-    )
+    return cls("overview"), cls("emergency"), cls("tourism"), cls("fisherman")
 
 
 # ============================================================
-# DYNAMIC PAGE CONTEXT
+# PAGE INTRO CONTENT — and visibility. Hidden entirely on "/"
+# since Overview supplies its own hero inside pages/overview.py;
+# showing both would duplicate the framing.
+#
+# Content strings are sentence-case; ALL-CAPS presentation for the
+# kicker is handled purely in CSS (text-transform: uppercase on
+# .cp-page-kicker), matching how .cp-hero-kicker and
+# .cp-detail-toggle-label already work. Keeps the raw string
+# sentence-case for anything that reads the text directly.
 # ============================================================
 
 @callback(
     Output("page-kicker", "children"),
     Output("page-title", "children"),
     Output("page-description", "children"),
+    Output("page-intro", "style"),
     Input("url", "pathname"),
 )
 def update_page_context(pathname):
+    if pathname == "/" or pathname is None:
+        return "", "", "", {"display": "none"}
 
     if pathname == "/emergency":
-
-        return (
-            "EMERGENCY MONITORING",
+        content = (
+            "Emergency monitoring",
             "Coastal risk",
             "Monitor hazardous marine conditions and emerging coastal threats.",
         )
-
-    if pathname == "/tourism":
-
-        return (
-            "TOURISM INTELLIGENCE",
+    elif pathname == "/tourism":
+        content = (
+            "Tourism intelligence",
             "Coastal tourism",
             "Assess beach conditions and identify suitable coastal destinations.",
         )
-
-    if pathname == "/fisherman":
-
-        return (
-            "FISHING INTELLIGENCE",
+    elif pathname == "/fisherman":
+        content = (
+            "Fishing intelligence",
             "Fishing conditions",
             "Monitor marine conditions and identify safer fishing opportunities.",
         )
+    else:
+        content = ("Coastal situation", "Coastal overview", "")
 
-    return (
-        "COASTAL SITUATION",
-        "Coastal overview",
-        "A live view of coastal conditions, risks and opportunities.",
-    )
+    return content[0], content[1], content[2], {"display": "flex"}
 
 
 # ============================================================
@@ -1200,11 +1059,7 @@ def update_page_context(pathname):
     Input("selected-location", "data"),
 )
 def update_context_location(location):
-
-    if not location:
-        return "No location selected"
-
-    return location
+    return location if location else "No location selected"
 
 
 # ============================================================
@@ -1216,20 +1071,13 @@ def update_context_location(location):
     Input("url", "pathname"),
 )
 def update_context_date(pathname):
-
-    # Deliberately kept generic here.
-    #
-    # Individual pages should display the actual observation
-    # date/time from their dataset.
-    #
-    # This avoids pretending that the current browser date is
-    # the date of the coastal observation.
-
+    # Deliberately generic — individual pages show their own real
+    # observation date/time from their dataset.
     return "Coastal monitoring"
 
 
 # ============================================================
-# FRESHNESS BADGE (real data, not decorative)
+# FRESHNESS INDICATOR (real data, not decorative)
 # ============================================================
 
 @callback(
@@ -1239,15 +1087,10 @@ def update_context_date(pathname):
     Input("freshness-interval", "n_intervals"),
 )
 def update_freshness_badge(_n_intervals):
-
     last_updated = get_last_updated()
 
     if last_updated is None:
-        return (
-            "cp-freshness-dot",
-            "Freshness unknown",
-            "cp-freshness cp-freshness-unknown",
-        )
+        return "cp-freshness-dot", "Freshness unknown", "cp-freshness cp-freshness-unknown"
 
     import pandas as pd
 
@@ -1262,15 +1105,9 @@ def update_freshness_badge(_n_intervals):
     else:
         label = f"Updated {int(hours / 24)}d ago"
 
-    # This is a daily batch pipeline — treat anything past ~36h as stale
-    # rather than pretending it's current.
     state = "fresh" if hours < 36 else "stale"
 
-    return (
-        "cp-freshness-dot",
-        label,
-        f"cp-freshness cp-freshness-{state}",
-    )
+    return "cp-freshness-dot", label, f"cp-freshness cp-freshness-{state}"
 
 
 # ============================================================
