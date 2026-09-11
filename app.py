@@ -1055,6 +1055,18 @@ app.layout = html.Div(
 # ============================================================
 # LOCATION → SHARED STORE
 # ============================================================
+#
+# One-way only: the dropdown is the single source of truth, the store is
+# derived from it. A second callback that also wrote back from the store
+# to the dropdown's value used to exist here — that created a cycle
+# (dropdown -> store -> dropdown) which Dash's dependency graph rejects
+# as a "Circular Dependency" error, exactly what you saw.
+#
+# If a future page needs to set the location some other way (e.g.
+# clicking a marker on the Emergency map), have THAT page's callback
+# target Output("location-dropdown", "value") directly — never re-add a
+# callback that writes back to the dropdown from "selected-location",
+# or the cycle returns.
 
 @callback(
     Output("selected-location", "data"),
@@ -1067,18 +1079,6 @@ def sync_selected_location(value):
     All pages can access:
         State("selected-location", "data")
     """
-    return value
-
-
-# ============================================================
-# KEEP DROPDOWN IN SYNC WITH SESSION STORE
-# ============================================================
-
-@callback(
-    Output("location-dropdown", "value"),
-    Input("selected-location", "data"),
-)
-def sync_location_dropdown(value):
     return value
 
 
@@ -1251,7 +1251,7 @@ def update_freshness_badge(_n_intervals):
 
     import pandas as pd
 
-    age = pd.Timestamp.utcnow() - last_updated
+    age = pd.Timestamp.now("UTC") - last_updated
     hours = age.total_seconds() / 3600
 
     if hours < 1:

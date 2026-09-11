@@ -30,19 +30,59 @@ from dotenv import load_dotenv
 # (project root, alongside app.py). Adjust the relative path below if you
 # place data_access.py somewhere else.
 sys.path.insert(0, str(Path(__file__).resolve().parent / "pipeline"))
+
+_FALLBACK_LOCATIONS = [
+    {"name": "Mirissa", "lat": 5.948, "lon": 80.455},
+    {"name": "Hikkaduwa", "lat": 6.139, "lon": 80.100},
+    {"name": "Unawatuna", "lat": 5.999, "lon": 80.249},
+    {"name": "Bentota", "lat": 6.421, "lon": 79.996},
+    {"name": "Arugam Bay", "lat": 6.840, "lon": 81.836},
+    {"name": "Negombo", "lat": 7.209, "lon": 79.855},
+    {"name": "Galle", "lat": 6.030, "lon": 80.217},
+    {"name": "Trincomalee", "lat": 8.587, "lon": 81.215},
+    {"name": "Chilaw", "lat": 7.576, "lon": 79.796},
+    {"name": "Colombo", "lat": 6.927, "lon": 79.861},
+    {"name": "Tangalle", "lat": 6.025, "lon": 80.793},
+    {"name": "Batticaloa", "lat": 7.717, "lon": 81.700},
+    {"name": "Jaffna", "lat": 9.661, "lon": 80.013},
+    {"name": "Matara", "lat": 5.948, "lon": 80.535},
+    {"name": "Puttalam", "lat": 8.031, "lon": 79.828},
+]
+_FALLBACK_TOURISM_ONLY = {"Mirissa", "Hikkaduwa", "Unawatuna", "Bentota", "Arugam Bay"}
+
 try:
-    from fetch_data import LOCATIONS, TOURISM_ONLY  # noqa: E402
+    from fetch_data import LOCATIONS as _RAW_LOCATIONS, TOURISM_ONLY  # noqa: E402
 except ImportError:
     # Fallback so this module can still be imported/tested standalone before
     # the pipeline/ folder is wired up in the same repo checkout. Keep this
     # in sync manually ONLY until the real import path is confirmed working —
     # this is exactly the kind of drift that caused the Gold-layer bug.
-    LOCATIONS = [
-        "Mirissa", "Hikkaduwa", "Unawatuna", "Bentota", "Arugam Bay",
-        "Negombo", "Galle", "Trincomalee", "Chilaw", "Colombo",
-        "Tangalle", "Batticaloa", "Jaffna", "Matara", "Puttalam",
-    ]
-    TOURISM_ONLY = {"Mirissa", "Hikkaduwa", "Unawatuna", "Bentota", "Arugam Bay"}
+    _RAW_LOCATIONS = _FALLBACK_LOCATIONS
+    TOURISM_ONLY = _FALLBACK_TOURISM_ONLY
+
+# fetch_data.LOCATIONS holds real name + lat/lon per location (each entry a
+# dict: {"name": ..., "lat": ..., "lon": ...}) — this is the single source
+# of truth for BOTH the flat name list every page/dropdown uses AND the
+# coordinates the Emergency map needs. Derive both from it here so nothing
+# downstream has to know the underlying shape, and there's no second
+# LOCATION_COORDS constant that can drift out of sync with the real list.
+if _RAW_LOCATIONS and isinstance(_RAW_LOCATIONS[0], dict):
+    LOCATIONS = [loc["name"] for loc in _RAW_LOCATIONS]
+    LOCATION_COORDS = {loc["name"]: (loc["lat"], loc["lon"]) for loc in _RAW_LOCATIONS}
+else:
+    # Older flat-string shape (name-only) — no coordinates available from
+    # fetch_data.py in this case, so fall back to placeholders and warn
+    # loudly rather than silently mapping the Emergency map to the wrong
+    # towns.
+    LOCATIONS = _RAW_LOCATIONS
+    print(
+        "[data_access] WARNING: fetch_data.LOCATIONS has no lat/lon per "
+        "entry — using placeholder coordinates for the Emergency map. "
+        "Update fetch_data.py's LOCATIONS to the {name, lat, lon} dict "
+        "format to fix this.",
+        file=sys.stderr,
+    )
+    LOCATION_COORDS = {loc["name"]: (loc["lat"], loc["lon"]) for loc in _FALLBACK_LOCATIONS}
 
 load_dotenv()
 
@@ -199,7 +239,7 @@ def get_fisherman_forecast(location: str) -> pd.DataFrame:
     """
     _validate_location(location)
     horizon = pd.date_range(
-        start=pd.Timestamp.utcnow().floor("h"), periods=48, freq="h"
+        start=pd.Timestamp.now("UTC").floor("h"), periods=48, freq="h"
     )
     import numpy as np
     rng = np.random.default_rng(seed=hash(location) % (2**32))
