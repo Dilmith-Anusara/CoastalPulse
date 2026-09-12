@@ -110,13 +110,35 @@ CREATE TABLE IF NOT EXISTS silver_hourly (
     wind_gust DOUBLE PRECISION,
     precipitation DOUBLE PRECISION,
     atmospheric_pressure DOUBLE PRECISION,
+    air_temperature DOUBLE PRECISION,
+    humidity DOUBLE PRECISION,
+    weather_code DOUBLE PRECISION,
+    cloud_cover DOUBLE PRECISION,
+    apparent_temperature DOUBLE PRECISION,
+    sunshine_duration DOUBLE PRECISION,
+    wind_direction DOUBLE PRECISION,
     uv_index DOUBLE PRECISION,
     pm25 DOUBLE PRECISION,
+    us_aqi DOUBLE PRECISION,
     inserted_at TIMESTAMPTZ DEFAULT now(),
     PRIMARY KEY (location_name, timestamp)
 );
 
 CREATE INDEX IF NOT EXISTS idx_silver_location_ts ON silver_hourly (location_name, timestamp);
+
+-- Added after the initial run: these columns weren't part of the original
+-- fetch, so CREATE TABLE IF NOT EXISTS alone won't add them to a table
+-- that already exists in production. These statements are the actual
+-- migration for the live table — additive only, existing rows just get
+-- NULL here until the matching backfill_* function (below) patches them.
+ALTER TABLE silver_hourly ADD COLUMN IF NOT EXISTS air_temperature DOUBLE PRECISION;
+ALTER TABLE silver_hourly ADD COLUMN IF NOT EXISTS humidity DOUBLE PRECISION;
+ALTER TABLE silver_hourly ADD COLUMN IF NOT EXISTS weather_code DOUBLE PRECISION;
+ALTER TABLE silver_hourly ADD COLUMN IF NOT EXISTS cloud_cover DOUBLE PRECISION;
+ALTER TABLE silver_hourly ADD COLUMN IF NOT EXISTS apparent_temperature DOUBLE PRECISION;
+ALTER TABLE silver_hourly ADD COLUMN IF NOT EXISTS sunshine_duration DOUBLE PRECISION;
+ALTER TABLE silver_hourly ADD COLUMN IF NOT EXISTS wind_direction DOUBLE PRECISION;
+ALTER TABLE silver_hourly ADD COLUMN IF NOT EXISTS us_aqi DOUBLE PRECISION;
 """
 
 
@@ -198,7 +220,7 @@ def fetch_location_month(loc, chunk_start, chunk_end):
     )
 
     m1 = fetch("https://marine-api.open-meteo.com/v1/marine",
-               {**common, "hourly": "wave_height,wave_period,wave_direction"})
+               {**common, "hourly": "wave_height,wave_period,wave_direction,sea_level_height_msl"})
     m2 = fetch("https://marine-api.open-meteo.com/v1/marine",
                {**common, "hourly": "swell_wave_height,swell_wave_direction,swell_wave_period,wind_wave_height"})
     m3 = None
@@ -206,9 +228,9 @@ def fetch_location_month(loc, chunk_start, chunk_end):
         m3 = fetch("https://marine-api.open-meteo.com/v1/marine",
                    {**common, "hourly": "sea_surface_temperature,ocean_current_velocity,ocean_current_direction"})
     w = fetch("https://archive-api.open-meteo.com/v1/archive",
-              {**common, "hourly": "wind_speed_10m,wind_gusts_10m,precipitation,surface_pressure"})
+              {**common, "hourly": "wind_speed_10m,wind_gusts_10m,precipitation,surface_pressure,temperature_2m,relative_humidity_2m,weather_code,cloud_cover,apparent_temperature,sunshine_duration,wind_direction_10m"})
     aq = fetch("https://air-quality-api.open-meteo.com/v1/air-quality",
-               {**common, "hourly": "uv_index,pm2_5"})
+               {**common, "hourly": "uv_index,pm2_5,us_aqi"})
 
     required = [m1, m2, w, aq] if is_tourism_only else [m1, m2, m3, w, aq]
     if not all(required):
@@ -288,13 +310,21 @@ def build_silver_rows(name, payload_map):
             "sea_surface_temp": m3["hourly"]["sea_surface_temperature"][i] if m3 else None,
             "ocean_current_velocity": m3["hourly"]["ocean_current_velocity"][i] if m3 else None,
             "ocean_current_direction": m3["hourly"]["ocean_current_direction"][i] if m3 else None,
-            "sea_level_height": None,  # no endpoint wired up yet — known gap, not a bug
+            "sea_level_height": m1["hourly"]["sea_level_height_msl"][i],
             "wind_speed": w["hourly"]["wind_speed_10m"][i],
             "wind_gust": w["hourly"]["wind_gusts_10m"][i],
             "precipitation": w["hourly"]["precipitation"][i],
             "atmospheric_pressure": w["hourly"]["surface_pressure"][i],
+            "air_temperature": w["hourly"]["temperature_2m"][i],
+            "humidity": w["hourly"]["relative_humidity_2m"][i],
+            "weather_code": w["hourly"]["weather_code"][i],
+            "cloud_cover": w["hourly"]["cloud_cover"][i],
+            "apparent_temperature": w["hourly"]["apparent_temperature"][i],
+            "sunshine_duration": w["hourly"]["sunshine_duration"][i],
+            "wind_direction": w["hourly"]["wind_direction_10m"][i],
             "uv_index": aq["hourly"]["uv_index"][i],
             "pm25": aq["hourly"]["pm2_5"][i],
+            "us_aqi": aq["hourly"]["us_aqi"][i],
         })
     return rows
 
@@ -303,6 +333,168 @@ def upsert_silver(rows):
     if not rows:
         return
     supabase.table("silver_hourly").upsert(rows, on_conflict="location_name,timestamp").execute()
+
+
+# ---------------------------------------------------------------------------
+# One-time backfill: air_temperature / humidity for rows fetched before
+# these fields were added to fetch_location_month(). Re-queries ONLY the
+# weather/archive endpoint (not marine or air-quality, which are
+# unaffected) and does a partial upsert touching just these two columns —
+# PostgREST's upsert only updates the columns present in the payload, so
+# every other column on the existing row is left untouched. Not called
+# from run()/__main__ — this is a separate one-off migration step, not
+# part of the ongoing pipeline.
+# ---------------------------------------------------------------------------
+
+def backfill_chunk_covered(location, chunk_start, chunk_end):
+    """Same shape as silver_chunk_covered, but counts rows where
+    air_temperature is already populated — lets an interrupted or re-run
+    backfill skip chunks it already patched instead of re-fetching them."""
+    resp = (
+        supabase.table("silver_hourly")
+        .select("timestamp", count="exact")
+        .eq("location_name", location)
+        .gte("timestamp", chunk_start.isoformat())
+        .lte("timestamp", chunk_end.isoformat() + "T23:59:59")
+        .not_.is_("air_temperature", "null")
+        .execute()
+    )
+    count = resp.count or 0
+    expected_hours = ((chunk_end - chunk_start).days + 1) * 24
+    return count >= expected_hours * SKIP_COVERAGE_THRESHOLD
+
+
+def backfill_temperature_humidity():
+    for loc in LOCATIONS:
+        name = loc["name"]
+        print(f"\n=== Backfilling {name} ===")
+        for chunk_start, chunk_end in month_chunks(GLOBAL_START, GLOBAL_END):
+            if backfill_chunk_covered(name, chunk_start, chunk_end):
+                print(f"  {chunk_start} to {chunk_end}: already backfilled, skipping")
+                continue
+
+            print(f"  Fetching {chunk_start} to {chunk_end}...")
+            common = dict(
+                latitude=loc["lat"], longitude=loc["lon"],
+                start_date=chunk_start.isoformat(), end_date=chunk_end.isoformat(),
+                timezone="Asia/Colombo",
+            )
+            w = fetch("https://archive-api.open-meteo.com/v1/archive",
+                      {**common, "hourly": "temperature_2m,relative_humidity_2m"})
+            if w is None:
+                print(f"    FAILED for {name} {chunk_start} to {chunk_end} — skipping, will retry on next run")
+                continue
+
+            times = w["hourly"]["time"]
+            rows = [
+                {
+                    "location_name": name,
+                    "timestamp": times[i],
+                    "air_temperature": w["hourly"]["temperature_2m"][i],
+                    "humidity": w["hourly"]["relative_humidity_2m"][i],
+                }
+                for i in range(len(times))
+            ]
+            upsert_silver(rows)
+            print(f"    Patched {len(rows)} rows with air_temperature/humidity.")
+
+    print("\nBackfill done.")
+
+
+# ---------------------------------------------------------------------------
+# One-time backfill: weather_code, cloud_cover, apparent_temperature,
+# sunshine_duration, wind_direction, sea_level_height, us_aqi — six more
+# fields added after the initial run. Unlike backfill_temperature_humidity
+# above, this one DOES go through Bronze staging (save -> build -> upsert
+# -> purge), matching run()'s pattern exactly, since it joins three
+# separate API sources (marine, weather, air quality) that need the same
+# alignment guarantee run() enforces for its own joins.
+# ---------------------------------------------------------------------------
+
+def backfill_extras_covered(location, chunk_start, chunk_end):
+    """weather_code comes from the 'weather' source, fetched for every
+    location regardless of tourism_only status — same reasoning as
+    backfill_chunk_covered's use of air_temperature."""
+    resp = (
+        supabase.table("silver_hourly")
+        .select("timestamp", count="exact")
+        .eq("location_name", location)
+        .gte("timestamp", chunk_start.isoformat())
+        .lte("timestamp", chunk_end.isoformat() + "T23:59:59")
+        .not_.is_("weather_code", "null")
+        .execute()
+    )
+    count = resp.count or 0
+    expected_hours = ((chunk_end - chunk_start).days + 1) * 24
+    return count >= expected_hours * SKIP_COVERAGE_THRESHOLD
+
+
+def backfill_marine_weather_extras():
+    for loc in LOCATIONS:
+        name = loc["name"]
+        print(f"\n=== Backfilling extras for {name} ===")
+        for chunk_start, chunk_end in month_chunks(GLOBAL_START, GLOBAL_END):
+            if backfill_extras_covered(name, chunk_start, chunk_end):
+                print(f"  {chunk_start} to {chunk_end}: already backfilled, skipping")
+                continue
+
+            print(f"  Fetching {chunk_start} to {chunk_end}...")
+            common = dict(
+                latitude=loc["lat"], longitude=loc["lon"],
+                start_date=chunk_start.isoformat(), end_date=chunk_end.isoformat(),
+                timezone="Asia/Colombo",
+            )
+            m = fetch("https://marine-api.open-meteo.com/v1/marine",
+                      {**common, "hourly": "sea_level_height_msl"})
+            w = fetch("https://archive-api.open-meteo.com/v1/archive",
+                      {**common, "hourly": "weather_code,cloud_cover,apparent_temperature,sunshine_duration,wind_direction_10m"})
+            aq = fetch("https://air-quality-api.open-meteo.com/v1/air-quality",
+                       {**common, "hourly": "us_aqi"})
+
+            if not all([m, w, aq]):
+                print(f"    FAILED for {name} {chunk_start} to {chunk_end} — skipping, will retry on next run")
+                continue
+
+            payload_map = {"marine_sealevel": m, "weather_extras": w, "air_quality_aqi": aq}
+            bronze_ids = save_bronze(name, payload_map)
+
+            times = w["hourly"]["time"]
+            mismatch = None
+            for label, payload in [("marine_sealevel", m), ("air_quality_aqi", aq)]:
+                other_times = payload["hourly"]["time"]
+                if other_times != times:
+                    mismatch = (
+                        f"{name}: '{label}' hourly timestamps do not match 'weather_extras' "
+                        f"(lengths: {len(other_times)} vs {len(times)})."
+                    )
+                    break
+
+            if mismatch:
+                print(f"    ALIGNMENT ERROR: {mismatch}")
+                print(f"    Bronze kept (NOT purged) for {name} {chunk_start} to {chunk_end} for inspection.")
+                continue
+
+            rows = [
+                {
+                    "location_name": name,
+                    "timestamp": times[i],
+                    "sea_level_height": m["hourly"]["sea_level_height_msl"][i],
+                    "weather_code": w["hourly"]["weather_code"][i],
+                    "cloud_cover": w["hourly"]["cloud_cover"][i],
+                    "apparent_temperature": w["hourly"]["apparent_temperature"][i],
+                    "sunshine_duration": w["hourly"]["sunshine_duration"][i],
+                    "wind_direction": w["hourly"]["wind_direction_10m"][i],
+                    "us_aqi": aq["hourly"]["us_aqi"][i],
+                }
+                for i in range(len(times))
+            ]
+            upsert_silver(rows)
+            print(f"    Patched {len(rows)} rows with weather/marine/AQI extras.")
+
+            purge_bronze(bronze_ids)
+            print(f"    Purged {len(bronze_ids)} Bronze records.")
+
+    print("\nBackfill done.")
 
 
 # ---------------------------------------------------------------------------

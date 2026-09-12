@@ -255,8 +255,10 @@ def get_fisherman_silver(location: str, days_back: int = 30) -> pd.DataFrame:
     Forecasts table once it exists. `days_back` limits payload size; the
     full 546-day history isn't needed for a rolling forecast view.
 
-    NOTE: no `air_temperature` column exists in silver_hourly (confirmed via
-    information_schema.columns) — don't reference it here or in any page.
+    `air_temperature` and `humidity` were added to silver_hourly after the
+    initial pipeline run (backfilled via
+    pipeline/fetch_data.py:backfill_temperature_humidity) — safe to
+    reference now, unlike when this note used to say otherwise.
     """
     if not location:
         raise ValueError("get_fisherman_silver requires a single location.")
