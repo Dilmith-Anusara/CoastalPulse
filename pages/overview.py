@@ -30,8 +30,10 @@ change.
 
 import dash
 from dash import html, dcc, callback, Input, Output
+import plotly.graph_objects as go
+import pandas as pd
 
-from data_access import get_emergency_data, get_tourism_data, get_fisherman_forecast
+from data_access import get_emergency_data, get_tourism_data, get_fisherman_forecast, LOCATION_COORDS
 from page_helpers import CLASSIFICATION_COLORS, EMERGENCY_VERDICT_TEXT, score_band
 
 dash.register_page(__name__, path="/", name="Overview")
@@ -84,9 +86,9 @@ hero = html.Div(
                 ),
                 html.Div(
                     [
-                        _stat("15", "Locations monitored"),
-                        _stat("3", "Emergency \u00b7 Tourism \u00b7 Fisherman"),
-                        _stat("Daily", "Data refresh"),
+                        _stat(html.Span("\u2014", id="overview-stat-safe-value"), "Locations safe today"),
+                        _stat(html.Span("\u2014", id="overview-stat-caution-value"), "Under caution or warning"),
+                        _stat(html.Span("\u2014", id="overview-stat-best-value"), html.Span("Best beach score today", id="overview-stat-best-label")),
                     ],
                     className="cp-stat-strip",
                 ),
@@ -97,6 +99,119 @@ hero = html.Div(
     ],
     className="cp-hero",
 )
+
+
+# ============================================================
+# TODAY ACROSS SRI LANKA — highlight line + status map. The page
+# previously had no live data at all above the per-location snapshot,
+# which is what made it feel like a marketing page rather than a
+# dashboard. Both pieces are Sri-Lanka-wide (not tied to the selected
+# location), so they're computed once per page load rather than
+# re-fetched every time the header's location dropdown changes.
+# ============================================================
+
+highlight_banner = html.Div(
+    html.Div(
+        id="overview-highlight",
+        style={
+            "borderLeft": "3px solid var(--teal)",
+            "paddingLeft": "16px",
+            "fontSize": "14.5px",
+            "lineHeight": "1.6",
+            "color": "var(--ink)",
+        },
+    ),
+    className="cp-section",
+)
+
+map_section = html.Div(
+    [
+        html.Div("Sri Lanka right now", className="cp-section-title"),
+        html.Div("Every monitored location, colored by today's coastal risk.", className="cp-section-sub"),
+        html.Div(
+            dcc.Graph(id="overview-map", config={"displayModeBar": False, "responsive": True}, style={"height": "420px"}),
+            className="cp-card",
+            style={"padding": "10px", "overflow": "hidden"},
+        ),
+    ],
+    className="cp-section",
+)
+
+
+def _empty_overview_map():
+    fig = go.Figure()
+    fig.update_layout(
+        map=dict(style="open-street-map", center=dict(lat=7.5, lon=80.7), zoom=6),
+        margin=dict(l=0, r=0, t=0, b=0),
+        paper_bgcolor="#F7F1E4",
+    )
+    return fig
+
+
+def _build_overview_map(latest_em):
+    if latest_em is None or latest_em.empty:
+        return _empty_overview_map()
+
+    fig = go.Figure()
+    for classification in ["Safe", "Caution", "Dangerous"]:
+        color = CLASSIFICATION_COLORS.get(classification, "#999")
+        group = latest_em[latest_em["classification"].astype(str).str.lower() == classification.lower()]
+        lats, lons, names, hover = [], [], [], []
+        for _, row in group.iterrows():
+            loc = row.get("location_name", "")
+            coords = LOCATION_COORDS.get(loc)
+            if coords is None:
+                continue
+            lat, lon = coords if not isinstance(coords, dict) else (coords.get("lat"), coords.get("lon"))
+            if lat is None or lon is None:
+                continue
+            lats.append(lat)
+            lons.append(lon)
+            names.append(loc)
+            wave = row.get("wave_height_max")
+            wave_text = f"<br>Wave: {wave:.2f} m" if pd.notna(wave) else ""
+            hover.append(f"<b>{loc}</b><br>{classification}{wave_text}")
+        if lats:
+            fig.add_trace(go.Scattermap(
+                lat=lats, lon=lons, mode="markers", name=classification,
+                text=names, hovertext=hover, hoverinfo="text",
+                marker=dict(size=12, color=color, opacity=0.9),
+            ))
+
+    fig.update_layout(
+        map=dict(style="open-street-map", center=dict(lat=7.5, lon=80.7), zoom=6.2),
+        margin=dict(l=0, r=0, t=0, b=0),
+        paper_bgcolor="#F7F1E4",
+        legend=dict(
+            orientation="h", yanchor="bottom", y=0.02, xanchor="left", x=0.02,
+            bgcolor="rgba(247,241,228,0.92)", bordercolor="#E4DAC4", borderwidth=1,
+            font=dict(size=11, color="#16262C"),
+        ),
+    )
+    return fig
+
+
+def _build_highlight(safe, caution, dangerous, total, best_name, best_score):
+    if not total:
+        return "Live status is temporarily unavailable."
+
+    if dangerous > 0:
+        risk_text = (
+            f"{dangerous} location{'s' if dangerous != 1 else ''} "
+            f"{'are' if dangerous != 1 else 'is'} at Dangerous risk today — "
+            "check Emergency mode before heading to the coast there."
+        )
+    elif caution > 0:
+        risk_text = f"Conditions are calm at most locations, but {caution} {'are' if caution != 1 else 'is'} under Caution today."
+    else:
+        risk_text = f"All {total} monitored locations are Safe today."
+
+    if best_name and best_score is not None and pd.notna(best_score):
+        beach_text = f" {best_name} has today's best beach conditions, scoring {best_score:.0f}/100."
+    else:
+        beach_text = ""
+
+    return risk_text + beach_text
 
 
 # ============================================================
@@ -178,14 +293,87 @@ snapshot_section = html.Div(
 layout = html.Div(
     [
         hero,
-        nav_section,
+        highlight_banner,
+        map_section,
+        # Snapshot sits before the mode picker, not after — it answers
+        # "what about MY location specifically" as the last big-picture
+        # beat, so the audience nav that follows reads as the page's
+        # actual call to action ("now go pick a mode") instead of being
+        # undercut by a detail table appearing right after it.
         html.Div(snapshot_section, className="cp-verdict-zone"),
+        nav_section,
     ]
 )
 
 
 def _badge(text, color):
     return html.Span(text, className="cp-badge", style={"backgroundColor": color})
+
+
+# ============================================================
+# LIVE STATS + MAP — Sri-Lanka-wide, so this fires once per page
+# load (on the "/" route) rather than on every location change like
+# update_overview_snapshot below does.
+# ============================================================
+
+@callback(
+    Output("overview-stat-safe-value", "children"),
+    Output("overview-stat-caution-value", "children"),
+    Output("overview-stat-best-value", "children"),
+    Output("overview-stat-best-label", "children"),
+    Output("overview-highlight", "children"),
+    Output("overview-map", "figure"),
+    Input("url", "pathname"),
+)
+def update_overview_live(pathname):
+    if pathname not in ("/", None):
+        return (dash.no_update,) * 6
+
+    try:
+        em_df = get_emergency_data()
+    except Exception:
+        em_df = pd.DataFrame()
+
+    try:
+        tm_df = get_tourism_data()
+    except Exception:
+        tm_df = pd.DataFrame()
+
+    latest_em = pd.DataFrame()
+    if em_df is not None and not em_df.empty:
+        em_df = em_df.copy()
+        em_df["date"] = pd.to_datetime(em_df["date"], errors="coerce")
+        latest_em = em_df.sort_values("date").groupby("location_name", as_index=False).tail(1)
+
+    safe_count = caution_count = dangerous_count = total_count = 0
+    if not latest_em.empty:
+        cls = latest_em["classification"].astype(str).str.lower()
+        safe_count = int((cls == "safe").sum())
+        caution_count = int((cls == "caution").sum())
+        dangerous_count = int((cls == "dangerous").sum())
+        total_count = len(latest_em)
+
+    best_name, best_score = None, None
+    if tm_df is not None and not tm_df.empty:
+        tm_df = tm_df.copy()
+        tm_df["date"] = pd.to_datetime(tm_df["date"], errors="coerce")
+        tm_df["suitability_score"] = pd.to_numeric(tm_df["suitability_score"], errors="coerce")
+        latest_tm = tm_df.sort_values("date").groupby("location_name", as_index=False).tail(1)
+        latest_tm = latest_tm.dropna(subset=["suitability_score"])
+        if not latest_tm.empty:
+            top = latest_tm.sort_values("suitability_score", ascending=False).iloc[0]
+            best_name = top.get("location_name")
+            best_score = top.get("suitability_score")
+
+    safe_text = f"{safe_count}/{total_count}" if total_count else "—"
+    caution_text = str(caution_count + dangerous_count) if total_count else "—"
+    best_value_text = f"{best_score:.0f}" if best_score is not None and pd.notna(best_score) else "—"
+    best_label_text = f"Best beach score today — {best_name}" if best_name else "Best beach score today"
+
+    highlight = _build_highlight(safe_count, caution_count, dangerous_count, total_count, best_name, best_score)
+    map_fig = _build_overview_map(latest_em)
+
+    return safe_text, caution_text, best_value_text, best_label_text, highlight, map_fig
 
 
 @callback(

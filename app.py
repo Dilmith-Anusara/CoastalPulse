@@ -45,6 +45,8 @@ for anything that reads the raw string (e.g. screen readers navigating
 by text, or logging). No structural/behavioral changes.
 """
 
+import os
+
 import dash
 from dash import Dash, html, dcc, Input, Output, State, callback
 
@@ -63,6 +65,11 @@ app = Dash(
 )
 
 app.title = "CoastalPulse"
+
+# WSGI entry point a production server (gunicorn, per the Procfile) runs
+# instead of Dash's own dev server. Dash apps are Flask apps underneath —
+# `app.run()` below is only for local development.
+server = app.server
 
 
 # ============================================================
@@ -1118,4 +1125,10 @@ def update_freshness_badge(_n_intervals):
 # ============================================================
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    # debug=True (Dash's dev server, with hot reload + the debug UI) is for
+    # local development only. Production runs through gunicorn via the
+    # Procfile instead, which never executes this block at all — this
+    # guard is a second layer of protection in case something ever does
+    # invoke `python app.py` on a server.
+    debug_mode = os.environ.get("DASH_DEBUG", "false").lower() == "true"
+    app.run(debug=debug_mode)
