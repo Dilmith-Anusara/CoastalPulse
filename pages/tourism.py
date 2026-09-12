@@ -1,65 +1,126 @@
 """
 pages/tourism.py — Tourism mode.
 
-Real gold_tourism_daily columns (confirmed via information_schema.columns):
-    daylight_hours_covered, date, wave_height_mean, wind_speed_mean,
-    sea_surface_temp_mean, uv_index_mean, precipitation_sum,
-    suitability_score, location_name
+gold_tourism_daily columns: location_name, date, wave_height_mean,
+wind_speed_mean, sea_surface_temp_mean, uv_index_mean, precipitation_sum,
+suitability_score, daylight_hours_covered
 
-Same verdict/detail split as Emergency, for the same reason: a tourist
-checking "is today good for the beach" doesn't want a suitability_score
-line chart, they want a plain sentence and a few readable condition chips.
-The trend charts and cross-location ranking are demoted to the detail zone.
+Same verdict/detail split as Emergency: plain sentence + gauge + 7-day
+strip always visible; charts and cross-location map behind "Show details".
 
-suitability_score is still a first-draft placeholder formula (per the
-project handoff) — every place it's shown says so, it is not presented as
-an authoritative number.
+suitability_score is a first-draft placeholder formula (per handoff) —
+every place it's shown says so.
 """
 
 import dash
 from dash import html, dcc, callback, Input, Output
 import plotly.graph_objects as go
 import plotly.express as px
+import pandas as pd
 
-from data_access import get_tourism_data
+from data_access import get_tourism_data, get_tourism_extras
+from design_system import (
+    CARD, TEXT, MUTED, BORDER, NAVY, NAVY_2, LIVE_COLOR, LIVE_BG,
+    ACCENT_BLUE, ACCENT_ORANGE, ACCENT_TEAL, ACCENT_PINK, ACCENT_PURPLE, ACCENT_GREEN,
+    PAGE_STYLE, HERO_STYLE, CARD_STYLE, VERDICT_ZONE_CLASS, DETAIL_ZONE_CLASS,
+    section_title, metric_card, chart_card, day_pill, day_strip_grid,
+    empty_chart, empty_map, stat_gauge_figure,
+)
+
+try:
+    from data_access import TOURISM_ONLY
+except ImportError:
+    TOURISM_ONLY = ["Mirissa", "Hikkaduwa", "Unawatuna", "Bentota", "Arugam Bay"]
+
+try:
+    from data_access import LOCATION_COORDS
+except ImportError:
+    LOCATION_COORDS = {}
 
 dash.register_page(__name__, path="/tourism", name="Tourism")
 
-# suitability_score bands — same "first-draft, not settled" caveat as the
-# score itself. Only used to pick a plain-language word, not a hard cutoff.
-SCORE_BANDS = [
-    (70, "Good beach day", "#2ecc71"),
-    (40, "Fair — some conditions worth checking", "#f39c12"),
-    (0, "Not ideal today", "#e74c3c"),
+# Provisional score bands (0-40 Not ideal, 40-70 Fair, 70-100 Good) — used
+# for the gauge bands and as the fallback below. Same "not yet validated"
+# caveat as Emergency's wave thresholds.
+SCORE_FAIR_MIN = 40
+SCORE_GOOD_MIN = 70
+HISTORY_MIN_ROWS = 30
+CHART_WINDOW_DAYS = 30
+
+_FALLBACK_SCORE_BANDS = [
+    (SCORE_GOOD_MIN, "Good beach day", ACCENT_TEAL),
+    (SCORE_FAIR_MIN, "Fair — some conditions worth checking", ACCENT_ORANGE),
+    (0, "Not ideal today", ACCENT_PINK),
 ]
 
+try:
+    from page_helpers import score_band as _page_helpers_score_band
+except ImportError:
+    _page_helpers_score_band = None
 
-def _score_band(score):
-    if score is None:
-        return "conditions unknown", "#999"
-    for threshold, label, color in SCORE_BANDS:
+
+def score_band(score):
+    if score is None or pd.isna(score):
+        return "Conditions unknown", MUTED
+    if _page_helpers_score_band is not None:
+        try:
+            result = _page_helpers_score_band(score)
+            if isinstance(result, (tuple, list)) and len(result) >= 2:
+                return result[0], result[1]
+        except Exception:
+            pass
+    for threshold, label, color in _FALLBACK_SCORE_BANDS:
         if score >= threshold:
             return label, color
-    return SCORE_BANDS[-1][1], SCORE_BANDS[-1][2]
+    return _FALLBACK_SCORE_BANDS[-1][1], _FALLBACK_SCORE_BANDS[-1][2]
+
+
+def suitability_gauge_figure(score, band_color):
+    steps = [
+        {"range": [0, SCORE_FAIR_MIN], "color": "rgba(176,58,107,0.55)"},
+        {"range": [SCORE_FAIR_MIN, SCORE_GOOD_MIN], "color": "rgba(245,158,11,0.55)"},
+        {"range": [SCORE_GOOD_MIN, 100], "color": "rgba(30,138,138,0.55)"},
+    ]
+    return stat_gauge_figure(score, 100, band_color, steps, suffix="")
+
+
+def suitability_context_text(history_score_series, current_score, location_label):
+    """Mirrors emergency.py's history_context_text — spends the full
+    ~1.5 years of history on one sentence instead of nothing. Higher
+    suitability score is BETTER (opposite direction from wave height),
+    so the wording is inverted accordingly.
+    """
+    if current_score is None or pd.isna(current_score):
+        return ""
+    valid = history_score_series.dropna()
+    if len(valid) < HISTORY_MIN_ROWS:
+        return ""
+    percentile = (valid <= current_score).mean() * 100
+    if percentile >= 95:
+        return f"One of the best beach days recorded at {location_label} — better than {percentile:.0f}% of days on record."
+    if percentile >= 70:
+        return f"Better than {percentile:.0f}% of days recorded at {location_label}."
+    if percentile <= 30:
+        return f"One of the less ideal days for {location_label} — lower than {100 - percentile:.0f}% of days recorded here."
+    return f"Fairly typical for {location_label} — around the middle of the range recorded here."
 
 
 def _uv_band(uv):
-    # Standard WHO UV Index scale.
-    if uv is None:
-        return "—", "#999"
+    if uv is None or pd.isna(uv):
+        return "—"
     if uv < 3:
-        return "Low", "#2ecc71"
+        return "Low"
     if uv < 6:
-        return "Moderate", "#f1c40f"
+        return "Moderate"
     if uv < 8:
-        return "High", "#f39c12"
+        return "High"
     if uv < 11:
-        return "Very High", "#e74c3c"
-    return "Extreme", "#9b59b6"
+        return "Very High"
+    return "Extreme"
 
 
 def _wave_band(wave):
-    if wave is None:
+    if wave is None or pd.isna(wave):
         return "—"
     if wave < 0.5:
         return "Calm"
@@ -71,7 +132,7 @@ def _wave_band(wave):
 
 
 def _rain_band(precip):
-    if precip is None:
+    if precip is None or pd.isna(precip):
         return "—"
     if precip < 1:
         return "Dry"
@@ -80,215 +141,481 @@ def _rain_band(precip):
     return "Rainy"
 
 
-def _condition_chip(icon, label, value_text, sub_color=None):
-    return html.Div(
-        [
-            html.Div(icon, style={"fontSize": "22px", "marginBottom": "6px"}),
-            html.Div(value_text, style={"fontSize": "15px", "fontWeight": "700"}),
-            html.Div(label, style={"fontSize": "11px", "color": "#72838c"}),
-        ],
-        style={
-            "flex": "1",
-            "textAlign": "center",
-            "padding": "14px 8px",
-            "borderRadius": "8px",
-            "background": "#ffffff",
-            "border": "1px solid #dce5e9",
-        },
-    )
+def _aqi_band(pm25):
+    """Simplified US EPA PM2.5 bands (ug/m3) — plain-language only, not
+    an official AQI calculation."""
+    if pm25 is None or pd.isna(pm25):
+        return "—"
+    if pm25 <= 12:
+        return "Good"
+    if pm25 <= 35.4:
+        return "Moderate"
+    if pm25 <= 55.4:
+        return "Unhealthy for sensitive groups"
+    if pm25 <= 150.4:
+        return "Unhealthy"
+    return "Very unhealthy"
 
+
+def _map_hover_text(location_name, score):
+    lines = [f"<b>{location_name}</b>"]
+    if pd.notna(score):
+        lines.append(f"Score: {score:.0f}/100")
+    return "<br>".join(lines)
+
+
+# ============================================================
+# LAYOUT
+# ============================================================
 
 layout = html.Div(
     [
-        # Verdict zone: plain-language beach verdict + readable condition
-        # chips + a 7-day strip. No raw scores or line charts here.
         html.Div(
             [
-                html.Div(id="tourism-verdict"),
+                html.Div(id="tourism-hero", style=HERO_STYLE),
+                html.Div(id="tourism-best-pick", style={"marginBottom": "24px"}),
                 html.Div(
-                    id="tourism-condition-chips",
-                    style={"display": "flex", "gap": "10px", "marginTop": "1rem"},
+                    [
+                        section_title("Last 7 days", "How conditions looked recently at this location."),
+                        html.Div(id="tourism-day-strip"),
+                    ],
+                    style=CARD_STYLE,
                 ),
-                html.Div(id="tourism-day-strip", style={"marginTop": "1rem"}),
             ],
-            className="cp-verdict-zone",
+            className=VERDICT_ZONE_CLASS,
         ),
-        # Detail zone: hidden until "Show details" is switched on.
+
+        html.Div(style={"height": "24px"}),
+
         html.Div(
             [
                 html.Div(
                     "Suitability score is a first-draft placeholder formula, "
-                    "not a validated or authoritative metric \u2014 treat it "
-                    "as a rough guide.",
+                    "not a validated or authoritative metric — treat it as a "
+                    "rough guide.",
                     style={
-                        "backgroundColor": "#fff8e1", "padding": "0.5rem 1rem",
-                        "borderLeft": "4px solid #f39c12", "marginBottom": "1rem",
-                        "fontSize": "12px",
+                        "backgroundColor": "#fff8e1", "padding": "12px 16px",
+                        "borderLeft": f"4px solid {ACCENT_ORANGE}", "borderRadius": "6px",
+                        "marginBottom": "24px", "fontSize": "12px", "color": TEXT,
                     },
                 ),
-                html.H3("Suitability Score Trend"),
-                dcc.Graph(id="tourism-suitability-timeseries"),
+
+                html.Div(
+                    [],
+                    id="tourism-condition-chips",
+                    style={
+                        "display": "grid",
+                        "gridTemplateColumns": "repeat(auto-fit, minmax(180px, 1fr))",
+                        "gap": "18px", "marginBottom": "24px",
+                    },
+                ),
+
+                section_title(
+                    "Right now: surf & air quality",
+                    "Latest available hourly readings — a snapshot, not the daylight-hours average used above.",
+                ),
+                html.Div(
+                    [],
+                    id="tourism-extra-chips",
+                    style={
+                        "display": "grid",
+                        "gridTemplateColumns": "repeat(auto-fit, minmax(180px, 1fr))",
+                        "gap": "18px", "marginBottom": "24px",
+                    },
+                ),
+
+                chart_card("Sea & wind — last 30 days", "Mean wave height and wind speed during daylight hours.",
+                           "tourism-sea-wind-chart", height=360),
+                html.Div(style={"height": "24px"}),
+
+                chart_card("Sun & rainfall — last 30 days", "Mean UV index and total precipitation during daylight hours.",
+                           "tourism-sun-rain-chart", height=360),
+                html.Div(style={"height": "24px"}),
+
+                chart_card("Sea surface temperature — last 30 days", "Mean sea temperature during daylight hours.",
+                           "tourism-sst-chart", height=320),
                 html.Div(id="tourism-sst-note"),
-                html.H3("Daylight-Hours Mean Conditions"),
-                dcc.Graph(id="tourism-conditions"),
-                html.H3("Ranked Comparison \u2014 All Locations, Latest Day"),
-                dcc.Graph(id="tourism-ranked-comparison"),
+                html.Div(style={"height": "24px"}),
+
+                html.Div(
+                    [
+                        section_title("Suitability map — all locations, latest day",
+                                      "How every location compares right now."),
+                        dcc.Graph(id="tourism-map", config={"displayModeBar": False, "responsive": True},
+                                  style={"height": "480px"}),
+                    ],
+                    style=CARD_STYLE,
+                ),
+                html.Div(style={"height": "24px"}),
+
+                chart_card("Ranked comparison — all locations, latest day",
+                           "This location's suitability score against every other location today.",
+                           "tourism-ranked-comparison", height=360),
             ],
-            className="cp-detail-zone",
+            className=DETAIL_ZONE_CLASS,
         ),
-    ]
+    ],
+    style=PAGE_STYLE,
 )
 
 
+# ============================================================
+# MAIN CALLBACK
+# ============================================================
+
 @callback(
-    Output("tourism-verdict", "children"),
-    Output("tourism-condition-chips", "children"),
+    Output("tourism-hero", "children"),
     Output("tourism-day-strip", "children"),
-    Output("tourism-suitability-timeseries", "figure"),
+    Output("tourism-condition-chips", "children"),
+    Output("tourism-extra-chips", "children"),
+    Output("tourism-sea-wind-chart", "figure"),
+    Output("tourism-sun-rain-chart", "figure"),
+    Output("tourism-sst-chart", "figure"),
     Output("tourism-sst-note", "children"),
-    Output("tourism-conditions", "figure"),
     Input("selected-location", "data"),
 )
 def update_tourism_page(location):
-    df = get_tourism_data(location)
-    if df.empty:
-        empty_fig = go.Figure()
+
+    if not location:
         return (
-            html.Div(f"No data available for {location}."),
-            [], html.Div(), empty_fig, html.Div(), empty_fig,
+            html.Div("Choose a location to see beach conditions.", style={"color": "white", "fontSize": "16px"}),
+            html.Div(), [], [], empty_chart(), empty_chart(), empty_chart(), html.Div(),
         )
 
-    latest = df.iloc[-1]
-    score = latest.get("suitability_score")
-    band_label, band_color = _score_band(score)
+    try:
+        df = get_tourism_data(location)
+    except Exception:
+        return (
+            html.Div(f"We couldn't load data for {location} right now.", style={"color": "white", "fontSize": "16px"}),
+            html.Div(), [], [], empty_chart(), empty_chart(), empty_chart(), html.Div(),
+        )
 
-    verdict = html.Div(
+    if df is None or df.empty:
+        return (
+            html.Div(f"No data available for {location}.", style={"color": "white", "fontSize": "16px"}),
+            html.Div(), [], [], empty_chart(), empty_chart(), empty_chart(), html.Div(),
+        )
+
+    data = df.copy()
+    if "date" in data.columns:
+        data["date"] = pd.to_datetime(data["date"], errors="coerce")
+        data = data.sort_values("date")
+
+    for col in ["wave_height_mean", "wind_speed_mean", "sea_surface_temp_mean", "uv_index_mean", "precipitation_sum", "suitability_score", "daylight_hours_covered"]:
+        if col in data.columns:
+            data[col] = pd.to_numeric(data[col], errors="coerce")
+
+    latest = data.iloc[-1]
+    score = latest.get("suitability_score")
+    band_label, band_color = score_band(score)
+    score_text = f"{score:.0f}/100" if pd.notna(score) else "—"
+    date_text = latest["date"].strftime("%d %b %Y") if pd.notna(latest.get("date")) else ""
+
+    history_note = suitability_context_text(data["suitability_score"], score, location) if "suitability_score" in data.columns else ""
+    gauge_fig = suitability_gauge_figure(score, band_color)
+
+    # --- Hero (verdict zone) — same shape as Emergency's hero ---
+    hero = html.Div(
         [
             html.Div(
                 [
-                    html.Span(
-                        f"{score:.0f}/100" if score is not None else "\u2014",
-                        style={
-                            "backgroundColor": band_color, "color": "white",
-                            "padding": "0.5rem 1rem", "borderRadius": "4px",
-                            "fontWeight": "bold", "fontSize": "1.2rem",
-                        },
-                    ),
-                    html.Span(
-                        f"  as of {latest['date'].date()}",
-                        style={"marginLeft": "1rem", "color": "#72838c"},
-                    ),
-                ]
-            ),
-            html.Div(
-                f"{location}: {band_label}",
-                style={"marginTop": "0.75rem", "fontSize": "1.05rem"},
-            ),
-        ]
-    )
-
-    wave_label = _wave_band(latest.get("wave_height_mean"))
-    uv_label, _ = _uv_band(latest.get("uv_index_mean"))
-    rain_label = _rain_band(latest.get("precipitation_sum"))
-    sst = latest.get("sea_surface_temp_mean")
-
-    chips = [
-        _condition_chip("\U0001F30A", "Sea", wave_label),
-        _condition_chip("\u2600\uFE0F", "UV Index", uv_label),
-        _condition_chip("\U0001F327\uFE0F", "Rain", rain_label),
-        _condition_chip(
-            "\U0001F321\uFE0F", "Sea temp",
-            f"{sst:.0f}\u00b0C" if sst is not None else "N/A",
-        ),
-    ]
-
-    # 7-day strip, colored by suitability score band.
-    recent = df.tail(7)
-    day_chips = []
-    for _, row in recent.iterrows():
-        row_score = row.get("suitability_score")
-        _, row_color = _score_band(row_score)
-        day_chips.append(
-            html.Div(
-                [
-                    html.Div(row["date"].strftime("%a"),
-                              style={"fontSize": "11px", "fontWeight": "700", "color": "#72838c"}),
-                    html.Div(row["date"].strftime("%d %b"),
-                              style={"fontSize": "10px", "color": "#9aa8ae", "marginBottom": "6px"}),
                     html.Div(
-                        f"{row_score:.0f}" if row_score is not None else "\u2014",
-                        style={"fontSize": "15px", "fontWeight": "700", "color": "white"},
+                        "CURRENT BEACH CONDITIONS",
+                        style={"fontSize": "10px", "fontWeight": "750", "letterSpacing": "1.4px", "color": "#8EA6B0", "marginBottom": "20px"},
+                    ),
+                    html.Div(
+                        [
+                            html.Div(location, style={"fontSize": "24px", "fontWeight": "750", "color": "white"}),
+                            html.Span(
+                                score_text,
+                                style={
+                                    "marginLeft": "14px", "backgroundColor": band_color, "color": "white",
+                                    "padding": "7px 12px", "borderRadius": "20px", "fontSize": "11px", "fontWeight": "800",
+                                },
+                            ),
+                        ],
+                        style={"display": "flex", "alignItems": "center", "flexWrap": "wrap", "rowGap": "10px"},
+                    ),
+                    html.Div(
+                        band_label,
+                        style={"fontSize": "18px", "fontWeight": "600", "lineHeight": "1.7", "color": "white", "marginTop": "18px", "maxWidth": "480px"},
+                    ),
+                    html.Div(
+                        history_note,
+                        style={"fontSize": "13px", "lineHeight": "1.6", "color": "#B8C9CF", "marginTop": "10px", "maxWidth": "480px"},
+                    ),
+                    html.Div(
+                        f"Latest observation: {date_text}" if date_text else "Latest observation available",
+                        style={"fontSize": "11px", "color": "#718991", "marginTop": "22px"},
                     ),
                 ],
-                style={
-                    "flex": "1", "textAlign": "center", "padding": "10px 6px",
-                    "borderRadius": "6px", "background": row_color,
-                },
-            )
-        )
-    day_strip = html.Div(day_chips, style={"display": "flex", "gap": "6px"})
-
-    # --- Detail-zone charts (unchanged purpose, just demoted) -----------
-
-    suit_fig = go.Figure()
-    suit_fig.add_trace(
-        go.Scatter(x=df["date"], y=df["suitability_score"], mode="lines", name="Suitability score")
+                style={"flex": "1"},
+            ),
+            html.Div(
+                [
+                    html.Div(
+                        "SUITABILITY SCORE",
+                        style={"fontSize": "10px", "fontWeight": "700", "letterSpacing": "1px", "color": "#8EA6B0", "textAlign": "center", "marginBottom": "10px"},
+                    ),
+                    dcc.Graph(figure=gauge_fig, config={"displayModeBar": False}, style={"height": "190px", "width": "240px"}),
+                ],
+                style={"minWidth": "240px"},
+            ),
+        ],
+        style={"display": "flex", "justifyContent": "space-between", "alignItems": "center", "gap": "40px", "width": "100%"},
     )
-    suit_fig.update_layout(title="Suitability Score (0-100, first-draft formula)",
-                            yaxis_title="score", yaxis_range=[0, 100])
 
-    is_tourism_only = df["is_tourism_only"].iloc[-1] if "is_tourism_only" in df.columns else False
-    if is_tourism_only or df["sea_surface_temp_mean"].isna().any():
-        sst_note = html.Div(
-            f"Sea surface temperature isn't available for {location} "
-            "(no marine data fetched for this location, or a temporary gap "
-            "in the source archive) \u2014 not a data error.",
-            style={"color": "#888", "fontStyle": "italic", "marginBottom": "1rem"},
-        )
+    # --- 7-day strip ---
+    recent = data.tail(7)
+    pills = []
+    for _, row in recent.iterrows():
+        _, row_color = score_band(row.get("suitability_score"))
+        row_score = row.get("suitability_score")
+        badge_text = f"{row_score:.0f}" if pd.notna(row_score) else "—"
+        day_label = row["date"].strftime("%a") if pd.notna(row.get("date")) else "—"
+        date_label = row["date"].strftime("%d %b") if pd.notna(row.get("date")) else "—"
+        pills.append(day_pill(day_label, date_label, row_color, f"{row_color}22", badge_text))
+    day_strip = day_strip_grid(pills)
+
+    # --- Condition metric cards ---
+    wave_label = _wave_band(latest.get("wave_height_mean"))
+    uv_label = _uv_band(latest.get("uv_index_mean"))
+    rain_label = _rain_band(latest.get("precipitation_sum"))
+    sst = latest.get("sea_surface_temp_mean")
+    sst_text = f"{sst:.1f}°C" if pd.notna(sst) else "N/A"
+
+    wave_val = latest.get("wave_height_mean")
+    wind_val = latest.get("wind_speed_mean")
+    uv_val = latest.get("uv_index_mean")
+    precip_val = latest.get("precipitation_sum")
+    daylight_val = latest.get("daylight_hours_covered")
+    daylight_text = f"{daylight_val:.1f}" if pd.notna(daylight_val) else "—"
+
+    chips = [
+        metric_card("\U0001F30A", "Wave height", f"{wave_val:.2f}" if pd.notna(wave_val) else "\u2014", "m", accent=ACCENT_BLUE, note=wave_label),
+        metric_card("\U0001F4A8", "Wind speed", f"{wind_val:.1f}" if pd.notna(wind_val) else "\u2014", "km/h", accent=ACCENT_PURPLE),
+        metric_card("\u2600", "UV index", f"{uv_val:.1f}" if pd.notna(uv_val) else "\u2014", "", accent=ACCENT_ORANGE, note=uv_label),
+        metric_card("\U0001F327", "Rainfall", f"{precip_val:.1f}" if pd.notna(precip_val) else "\u2014", "mm", accent=ACCENT_TEAL, note=rain_label),
+        metric_card("\U0001F321", "Sea temp", sst_text, "", accent=ACCENT_PINK),
+        metric_card("\u25d1", "Daylight covered", daylight_text, "hrs", accent=LIVE_COLOR),
+    ]
+
+    # --- Surf & air quality — latest hourly snapshot from silver_hourly,
+    # not part of gold_tourism_daily. Degrades to an empty grid rather
+    # than crashing the page if the extra query fails.
+    try:
+        extras = get_tourism_extras(location)
+    except Exception:
+        extras = {}
+
+    pm25_val = extras.get("pm25_mean")
+    swell_height_val = extras.get("swell_height_mean")
+    swell_period_val = extras.get("swell_period_mean")
+    wave_period_val = extras.get("wave_period_mean")
+
+    extra_chips = [
+        metric_card("\U0001F4A8", "Air quality", f"{pm25_val:.0f}" if pd.notna(pm25_val) else "—", "µg/m³", accent=ACCENT_GREEN, note=_aqi_band(pm25_val)),
+        metric_card("\U0001F30A", "Swell height", f"{swell_height_val:.2f}" if pd.notna(swell_height_val) else "—", "m", accent=ACCENT_BLUE),
+        metric_card("⏱", "Swell period", f"{swell_period_val:.1f}" if pd.notna(swell_period_val) else "—", "s", accent=ACCENT_PURPLE),
+        metric_card("\U0001F30A", "Wave period", f"{wave_period_val:.1f}" if pd.notna(wave_period_val) else "—", "s", accent=ACCENT_TEAL),
+    ] if extras else []
+
+    # --- SST note — based on the latest row only ---
+    if pd.isna(sst):
+        if location in TOURISM_ONLY:
+            sst_note = html.Div(
+                f"Sea surface temperature isn't collected for {location} — this location doesn't fetch marine data. Not a data error.",
+                style={"color": MUTED, "fontStyle": "italic", "fontSize": "12px", "marginTop": "10px"},
+            )
+        else:
+            sst_note = html.Div(
+                f"Sea surface temperature is temporarily unavailable for {location} (a gap in the source archive) — not a data error.",
+                style={"color": MUTED, "fontStyle": "italic", "fontSize": "12px", "marginTop": "10px"},
+            )
     else:
         sst_note = html.Div()
 
-    conditions_fig = go.Figure()
-    conditions_fig.add_trace(go.Scatter(x=df["date"], y=df["wave_height_mean"], name="Wave height (m)"))
-    conditions_fig.add_trace(go.Scatter(x=df["date"], y=df["wind_speed_mean"], name="Wind speed (km/h)", yaxis="y2"))
-    if "sea_surface_temp_mean" in df.columns:
-        conditions_fig.add_trace(
-            go.Scatter(x=df["date"], y=df["sea_surface_temp_mean"], name="Sea surface temp (\u00b0C)", yaxis="y2")
-        )
-    if "uv_index_mean" in df.columns:
-        conditions_fig.add_trace(
-            go.Scatter(x=df["date"], y=df["uv_index_mean"], name="UV index (mean)", yaxis="y2")
-        )
-    if "precipitation_sum" in df.columns:
-        conditions_fig.add_trace(
-            go.Bar(x=df["date"], y=df["precipitation_sum"], name="Precipitation (mm)", opacity=0.4)
-        )
-    conditions_fig.update_layout(
-        title="Daylight-Hours Mean Conditions",
-        yaxis_title="meters",
-        yaxis2=dict(overlaying="y", side="right"),
+    # --- Charts, windowed to last 30 days ---
+    chart_data = data.tail(CHART_WINDOW_DAYS)
+
+    sea_wind_fig = go.Figure()
+    sw_data = chart_data.dropna(subset=["date"])
+    if "wave_height_mean" in sw_data.columns:
+        sea_wind_fig.add_trace(go.Scatter(x=sw_data["date"], y=sw_data["wave_height_mean"], name="Wave height (m)",
+                                           line=dict(color=ACCENT_BLUE, width=3), marker=dict(size=6, color=ACCENT_BLUE), mode="lines+markers"))
+    if "wind_speed_mean" in sw_data.columns:
+        sea_wind_fig.add_trace(go.Scatter(x=sw_data["date"], y=sw_data["wind_speed_mean"], name="Wind speed (km/h)", yaxis="y2",
+                                           line=dict(color=ACCENT_PURPLE, width=3), marker=dict(size=6, color=ACCENT_PURPLE), mode="lines+markers"))
+    sea_wind_fig.update_layout(
+        paper_bgcolor=CARD, plot_bgcolor=CARD, margin=dict(l=50, r=60, t=15, b=45),
+        font=dict(family="Inter, Arial", color=TEXT, size=11),
+        xaxis=dict(showgrid=False, zeroline=False, showline=True, linecolor=BORDER, tickfont=dict(color=MUTED)),
+        yaxis=dict(title="Wave height (m)", showgrid=True, gridcolor="#EDF1F3", title_font=dict(size=11, color=ACCENT_BLUE), tickfont=dict(color=MUTED)),
+        yaxis2=dict(title="Wind speed (km/h)", overlaying="y", side="right", showgrid=False, title_font=dict(size=11, color=ACCENT_PURPLE), tickfont=dict(color=MUTED)),
+        legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="right", x=1, font=dict(size=11, color=MUTED)),
+        hoverlabel=dict(bgcolor=NAVY, font_color="white"),
     )
 
-    return verdict, chips, day_strip, suit_fig, sst_note, conditions_fig
+    sun_rain_fig = go.Figure()
+    if "uv_index_mean" in sw_data.columns:
+        sun_rain_fig.add_trace(go.Scatter(x=sw_data["date"], y=sw_data["uv_index_mean"], name="UV index",
+                                           line=dict(color=ACCENT_ORANGE, width=3), marker=dict(size=6, color=ACCENT_ORANGE), mode="lines+markers"))
+    if "precipitation_sum" in sw_data.columns:
+        sun_rain_fig.add_trace(go.Bar(x=sw_data["date"], y=sw_data["precipitation_sum"], name="Precipitation (mm)", yaxis="y2",
+                                       marker_color=ACCENT_TEAL, opacity=0.45))
+    sun_rain_fig.update_layout(
+        paper_bgcolor=CARD, plot_bgcolor=CARD, margin=dict(l=50, r=60, t=15, b=45),
+        font=dict(family="Inter, Arial", color=TEXT, size=11),
+        xaxis=dict(showgrid=False, zeroline=False, showline=True, linecolor=BORDER, tickfont=dict(color=MUTED)),
+        yaxis=dict(title="UV index", showgrid=True, gridcolor="#EDF1F3", title_font=dict(size=11, color=ACCENT_ORANGE), tickfont=dict(color=MUTED)),
+        yaxis2=dict(title="Precipitation (mm)", overlaying="y", side="right", showgrid=False, title_font=dict(size=11, color=ACCENT_TEAL), tickfont=dict(color=MUTED)),
+        legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="right", x=1, font=dict(size=11, color=MUTED)),
+        hoverlabel=dict(bgcolor=NAVY, font_color="white"),
+    )
+
+    sst_fig = go.Figure()
+    sst_data = chart_data.dropna(subset=["date", "sea_surface_temp_mean"]) if "sea_surface_temp_mean" in chart_data.columns else pd.DataFrame()
+    if not sst_data.empty:
+        sst_fig.add_trace(go.Scatter(x=sst_data["date"], y=sst_data["sea_surface_temp_mean"], name="Sea temp (°C)",
+                                      line=dict(color=ACCENT_PINK, width=3), marker=dict(size=6, color=ACCENT_PINK),
+                                      mode="lines+markers", fill="tozeroy", fillcolor="rgba(176,58,107,0.08)"))
+        sst_fig.update_layout(
+            paper_bgcolor=CARD, plot_bgcolor=CARD, margin=dict(l=50, r=20, t=15, b=45),
+            font=dict(family="Inter, Arial", color=TEXT, size=11),
+            xaxis=dict(showgrid=False, zeroline=False, showline=True, linecolor=BORDER, tickfont=dict(color=MUTED)),
+            yaxis=dict(title="Sea temp (°C)", showgrid=True, gridcolor="#EDF1F3", title_font=dict(size=11, color=MUTED), tickfont=dict(color=MUTED)),
+            hoverlabel=dict(bgcolor=NAVY, font_color="white"),
+        )
+    else:
+        sst_fig = empty_chart("No sea temperature data for this location")
+
+    return hero, day_strip, chips, extra_chips, sea_wind_fig, sun_rain_fig, sst_fig, sst_note
+
+
+# ============================================================
+# CROSS-LOCATION CALLBACK — ranked bar + map, one shared fetch
+# ============================================================
+
+def _best_pick_note(latest, selected_location):
+    """Always-visible planning aid: which of the 15 locations has the
+    best conditions right now. Deliberately backward/present-looking
+    only (today's Gold row), not a forecast claim — there's no
+    Forecasts table for Tourism yet (that's Fisherman's blocked-on-
+    SARIMA territory).
+    """
+    if latest.empty or "suitability_score" not in latest.columns:
+        return html.Div()
+
+    top = latest.iloc[0]
+    top_name = top.get("location_name")
+    top_score = top.get("suitability_score")
+    if pd.isna(top_score):
+        return html.Div()
+
+    own_row = latest[latest["location_name"] == selected_location]
+    own_score = own_row.iloc[0].get("suitability_score") if not own_row.empty else None
+
+    if selected_location and top_name == selected_location:
+        text = f"You're already at today's top-rated location for a beach day — {top_name} leads all 15 with a score of {top_score:.0f}/100."
+    elif pd.notna(own_score):
+        text = (
+            f"Today's best pick across all 15 locations is {top_name} (score {top_score:.0f}/100). "
+            f"{selected_location} scores {own_score:.0f}/100 today."
+        )
+    else:
+        text = f"Today's best pick across all 15 locations is {top_name} (score {top_score:.0f}/100)."
+
+    return html.Div(
+        text,
+        style={
+            "backgroundColor": "#EAF7F5", "padding": "12px 16px",
+            "borderLeft": f"4px solid {ACCENT_TEAL}", "borderRadius": "6px",
+            "fontSize": "13px", "color": TEXT, "lineHeight": "1.6",
+        },
+    )
 
 
 @callback(
     Output("tourism-ranked-comparison", "figure"),
-    Input("selected-location", "data"),  # trigger refresh only
+    Output("tourism-map", "figure"),
+    Output("tourism-best-pick", "children"),
+    Input("selected-location", "data"),  # also compares ALL locations, not just this one
 )
-def update_ranked_comparison(_location):
-    all_data = get_tourism_data(location=None)
-    if all_data.empty:
-        return go.Figure()
+def update_cross_location_views(selected_location):
+    try:
+        all_data = get_tourism_data(location=None)
+    except Exception:
+        return empty_chart(), empty_map(), html.Div()
 
-    latest_date = all_data["date"].max()
-    latest = all_data[all_data["date"] == latest_date].sort_values(
-        "suitability_score", ascending=False
-    )
+    if all_data is None or all_data.empty:
+        return empty_chart(), empty_map(), html.Div()
 
-    fig = px.bar(
+    data = all_data.copy()
+    data["date"] = pd.to_datetime(data["date"], errors="coerce")
+    data["suitability_score"] = pd.to_numeric(data["suitability_score"], errors="coerce")
+
+    latest_date = data["date"].max()
+    latest = data[data["date"] == latest_date].sort_values("suitability_score", ascending=False)
+
+    if latest.empty:
+        return empty_chart(), empty_map(), html.Div()
+
+    best_pick_note = _best_pick_note(latest, selected_location)
+
+    bar_fig = px.bar(
         latest, x="location_name", y="suitability_score",
-        title=f"Suitability Score by Location \u2014 {latest_date.date()}",
         labels={"location_name": "Location", "suitability_score": "Score"},
+        color_discrete_sequence=[ACCENT_TEAL],
     )
-    return fig
+    # Pick the current location out of the pack instead of leaving every
+    # bar the same color — otherwise "how do we compare" takes a manual
+    # scan of 15 x-axis labels.
+    bar_colors = [ACCENT_TEAL if name == selected_location else "#CFE3E3" for name in latest["location_name"]]
+    bar_fig.update_traces(marker_color=bar_colors)
+    bar_fig.update_layout(
+        paper_bgcolor=CARD, plot_bgcolor=CARD, margin=dict(l=45, r=20, t=10, b=60),
+        font=dict(family="Inter, Arial", color=TEXT, size=11),
+        yaxis=dict(title="Score (0-100)", range=[0, 100], gridcolor="#EDF1F3"),
+        xaxis=dict(title=None, tickangle=-35),
+    )
+
+    map_fig = go.Figure()
+    bands = [("Good", SCORE_GOOD_MIN, 100, ACCENT_TEAL), ("Fair", SCORE_FAIR_MIN, SCORE_GOOD_MIN, ACCENT_ORANGE), ("Not ideal", 0, SCORE_FAIR_MIN, ACCENT_PINK)]
+    for label, lo, hi, color in bands:
+        group = latest[(latest["suitability_score"] >= lo) & (latest["suitability_score"] < hi + (0.01 if hi == 100 else 0))]
+        lats, lons, names, hover = [], [], [], []
+        for _, row in group.iterrows():
+            loc_name = row.get("location_name", "")
+            coords = LOCATION_COORDS.get(loc_name)
+            if coords is None:
+                continue
+            lat = coords.get("lat") if isinstance(coords, dict) else coords[0]
+            lon = coords.get("lon") if isinstance(coords, dict) else coords[1]
+            if lat is None or lon is None:
+                continue
+            lats.append(lat)
+            lons.append(lon)
+            names.append(loc_name)
+            hover.append(_map_hover_text(loc_name, row.get("suitability_score")))
+        if lats:
+            map_fig.add_trace(go.Scattermap(lat=lats, lon=lons, mode="markers", name=label, text=names,
+                                             hovertext=hover, hoverinfo="text", marker=dict(size=13, color=color, opacity=0.9)))
+
+    if selected_location in LOCATION_COORDS:
+        coords = LOCATION_COORDS[selected_location]
+        lat = coords.get("lat") if isinstance(coords, dict) else coords[0]
+        lon = coords.get("lon") if isinstance(coords, dict) else coords[1]
+        if lat is not None and lon is not None:
+            map_fig.add_trace(go.Scattermap(lat=[lat], lon=[lon], mode="markers", hoverinfo="skip",
+                                             marker=dict(size=22, color="#102A36", opacity=0.22), showlegend=False))
+            map_fig.add_trace(go.Scattermap(lat=[lat], lon=[lon], mode="markers", hoverinfo="skip",
+                                             marker=dict(size=8, color="#102A36", opacity=1), showlegend=False))
+
+    map_fig.update_layout(
+        map=dict(style="open-street-map", center=dict(lat=7.5, lon=80.7), zoom=6),
+        margin=dict(l=0, r=0, t=0, b=0), paper_bgcolor=CARD,
+        legend=dict(orientation="h", yanchor="bottom", y=0.02, xanchor="left", x=0.02,
+                    bgcolor="rgba(255,255,255,0.92)", bordercolor=BORDER, borderwidth=1, font=dict(size=11, color=TEXT)),
+    )
+
+    return bar_fig, map_fig, best_pick_note

@@ -194,6 +194,57 @@ def get_tourism_data(location: str | None = None) -> pd.DataFrame:
     return df
 
 
+# --- Tourism mode: extras from silver_hourly --------------------------------
+
+@cache_stub
+def get_tourism_extras(location: str) -> dict:
+    """
+    Daylight-hours (06:00-18:00) means for silver_hourly columns that
+    aren't in gold_tourism_daily but matter to a tourist deciding whether
+    to go out today: air quality (pm25) and surf detail (swell height,
+    swell period, wave period). Computed on the fly from the latest
+    calendar day of raw hourly data rather than added to the Gold table,
+    since these are supplementary "nice to know" fields, not part of the
+    daily suitability formula.
+
+    Returns {} if no rows are found (mirrors get_emergency_data /
+    get_tourism_data returning an empty DataFrame rather than raising for
+    that case) — callers still need to handle a real connection error via
+    try/except, same as the other get_* functions here.
+    """
+    _validate_location(location)
+    if not location:
+        return {}
+
+    resp = (
+        get_client()
+        .table("silver_hourly")
+        .select("timestamp, pm25, swell_height, swell_period, wave_period")
+        .eq("location_name", location)
+        .order("timestamp", desc=True)
+        .limit(48)
+        .execute()
+    )
+    df = pd.DataFrame(resp.data)
+    if df.empty:
+        return {}
+
+    df["timestamp"] = pd.to_datetime(df["timestamp"])
+    latest_date = df["timestamp"].dt.date.max()
+    day_df = df[df["timestamp"].dt.date == latest_date]
+    daylight_df = day_df[(day_df["timestamp"].dt.hour >= 6) & (day_df["timestamp"].dt.hour < 18)]
+    if daylight_df.empty:
+        daylight_df = day_df
+
+    means = daylight_df.mean(numeric_only=True)
+    return {
+        "pm25_mean": means.get("pm25"),
+        "swell_height_mean": means.get("swell_height"),
+        "swell_period_mean": means.get("swell_period"),
+        "wave_period_mean": means.get("wave_period"),
+    }
+
+
 # --- Fisherman mode ---------------------------------------------------------
 
 @cache_stub

@@ -3,8 +3,11 @@ CoastalPulse
 Coastal Intelligence & Decision Support Platform
 
 Main application shell — restyled to the approved design direction
-(navy masthead, paper content, Source Serif 4 / IBM Plex Sans / IBM Plex
-Mono), replacing the earlier generic SaaS-dashboard look.
+(navy masthead, paper content, Fraunces / Public Sans / IBM Plex Mono),
+replacing the earlier generic SaaS-dashboard look. Fraunces + Public Sans
+replaced the original Source Serif 4 / IBM Plex Sans pairing, which read
+as a generic AI-generated-dashboard default rather than something a
+human designer picked.
 
 Routes:
     /            -> pages/overview.py    (supplies its own hero — see below)
@@ -78,7 +81,7 @@ app.index_string = """
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link
-        href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap"
+        href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Public+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap"
         rel="stylesheet"
     >
 
@@ -117,7 +120,7 @@ app.index_string = """
             padding: 0;
             background: var(--paper);
             color: var(--ink);
-            font-family: "IBM Plex Sans", Arial, sans-serif;
+            font-family: "Public Sans", Arial, sans-serif;
         }
 
         a {
@@ -132,7 +135,7 @@ app.index_string = """
         }
 
         h1, h2, h3 {
-            font-family: "Source Serif 4", serif;
+            font-family: "Fraunces", serif;
             font-weight: 500;
         }
 
@@ -206,7 +209,7 @@ app.index_string = """
             align-items: center;
             gap: 8px;
 
-            font-family: "Source Serif 4", serif;
+            font-family: "Fraunces", serif;
             font-weight: 600;
             font-size: 17px;
             color: var(--paper);
@@ -543,7 +546,7 @@ app.index_string = """
             line-height: 1.65;
             color: #C9D6D4;
             margin: 0;
-            font-family: "IBM Plex Sans", sans-serif;
+            font-family: "Public Sans", sans-serif;
         }
 
         .cp-hero-graphic {
