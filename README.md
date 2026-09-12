@@ -1,13 +1,3 @@
----
-title: CoastalPulse
-emoji: 🌊
-colorFrom: blue
-colorTo: green
-sdk: docker
-app_port: 7860
-pinned: false
----
-
 # CoastalPulse Dashboard — Skeleton
 
 This is dashboard build Steps 1-3 + the Fisherman shell (Step 5), per the

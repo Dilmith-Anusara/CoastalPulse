@@ -1,9 +1,0 @@
-.env
-.git
-.gitignore
-.venv/
-__pycache__/
-*.pyc
-.DS_Store
-testing_results/
-validation_scripts/
