@@ -57,26 +57,30 @@ from data_access import LOCATIONS, get_last_updated
 # APP
 # ============================================================
 
-app = Dash(
+dash_app = Dash(
     __name__,
     use_pages=True,
     pages_folder="pages",
     suppress_callback_exceptions=True,
 )
 
-app.title = "CoastalPulse"
+dash_app.title = "CoastalPulse"
 
-# WSGI entry point a production server (gunicorn, per the Procfile) runs
-# instead of Dash's own dev server. Dash apps are Flask apps underneath —
-# `app.run()` below is only for local development.
-server = app.server
+# WSGI entry point a production server runs instead of Dash's own dev
+# server. Dash apps are Flask apps underneath. Named literally `app` (not
+# `server`) because Vercel's zero-config Flask detection looks for a
+# Flask instance named `app` in app.py — using that exact name avoids
+# needing a custom pyproject.toml entrypoint, which pulled in a whole
+# separate uv/PEP-621 dependency-resolution path we don't want (we
+# already have requirements.txt as the single source of truth for deps).
+app = dash_app.server
 
 
 # ============================================================
 # GLOBAL CSS
 # ============================================================
 
-app.index_string = """
+dash_app.index_string = """
 <!DOCTYPE html>
 <html>
 <head>
@@ -925,7 +929,7 @@ page_header = html.Div(
 # MAIN LAYOUT
 # ============================================================
 
-app.layout = html.Div(
+dash_app.layout = html.Div(
     [
         location_store,
         detail_mode_store,
@@ -1126,9 +1130,10 @@ def update_freshness_badge(_n_intervals):
 
 if __name__ == "__main__":
     # debug=True (Dash's dev server, with hot reload + the debug UI) is for
-    # local development only. Production runs through gunicorn via the
-    # Procfile instead, which never executes this block at all — this
-    # guard is a second layer of protection in case something ever does
-    # invoke `python app.py` on a server.
+    # local development only. Production runs through Vercel's Python
+    # runtime instead, which imports this module for `app` (the Flask/WSGI
+    # object) and never executes this block at all — this guard is a
+    # second layer of protection in case something ever does invoke
+    # `python app.py` on a server.
     debug_mode = os.environ.get("DASH_DEBUG", "false").lower() == "true"
-    app.run(debug=debug_mode)
+    dash_app.run(debug=debug_mode)

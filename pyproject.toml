@@ -1,7 +1,0 @@
-[tool.vercel]
-# app.py's top-level `app` name is the Dash object, not a Flask instance —
-# Vercel's default auto-detection looks for a Flask instance literally
-# named `app`, which would grab the wrong object. `server` (app.server,
-# the underlying Flask/WSGI app) is what Vercel actually needs to run,
-# same object already exposed for the Render/Docker deploy paths.
-entrypoint = "app:server"
