@@ -797,6 +797,7 @@ navigation = html.Nav(
         nav_link("Overview", "/", "overview"),
         nav_link("Emergency", "/emergency", "emergency"),
         nav_link("Tourism", "/tourism", "tourism"),
+        nav_link("Analytics", "/analytics", "analytics"),
         nav_link("Fisherman", "/fisherman", "fisherman"),
     ],
     className="cp-navigation",
@@ -996,6 +997,7 @@ def apply_detail_mode(is_on):
     Output("nav-overview", "className"),
     Output("nav-emergency", "className"),
     Output("nav-tourism", "className"),
+    Output("nav-analytics", "className"),
     Output("nav-fisherman", "className"),
     Input("url", "pathname"),
 )
@@ -1006,6 +1008,8 @@ def update_active_navigation(pathname):
         current = "emergency"
     elif pathname.startswith("/tourism"):
         current = "tourism"
+    elif pathname.startswith("/analytics"):
+        current = "analytics"
     elif pathname.startswith("/fisherman"):
         current = "fisherman"
     else:
@@ -1014,7 +1018,7 @@ def update_active_navigation(pathname):
     def cls(name):
         return "cp-nav-link active" if name == current else "cp-nav-link"
 
-    return cls("overview"), cls("emergency"), cls("tourism"), cls("fisherman")
+    return cls("overview"), cls("emergency"), cls("tourism"), cls("analytics"), cls("fisherman")
 
 
 # ============================================================
@@ -1051,6 +1055,12 @@ def update_page_context(pathname):
             "Tourism intelligence",
             "Coastal tourism",
             "Assess beach conditions and identify suitable coastal destinations.",
+        )
+    elif pathname == "/analytics":
+        content = (
+            "Climate & marine analytics",
+            "Analytics",
+            "Trends, seasonality, and cross-location patterns across the full dataset.",
         )
     elif pathname == "/fisherman":
         content = (

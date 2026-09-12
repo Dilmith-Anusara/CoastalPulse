@@ -12,7 +12,7 @@ from data_access import (
 )
 from design_system import (
     BG, CARD, TEXT, MUTED, BORDER, NAVY, NAVY_2, LIVE_COLOR, LIVE_BG,
-    ACCENT_BLUE, ACCENT_PURPLE, ACCENT_PINK, ACCENT_ORANGE,
+    ACCENT_BLUE, ACCENT_PURPLE, ACCENT_PINK, ACCENT_ORANGE, ACCENT_TEAL,
     PAGE_STYLE, HERO_STYLE, CARD_STYLE, VERDICT_ZONE_CLASS, DETAIL_ZONE_CLASS,
     section_title, metric_card, chart_card, day_pill, day_strip_grid, empty_chart,
 )
@@ -483,6 +483,7 @@ layout = html.Div(
                         metric_card("≋", "Maximum wind speed", html.Span(id="emergency-wind-value"), "km/h", WIND_LINE),
                         metric_card("↯", "Maximum wind gust", html.Span(id="emergency-gust-value"), "km/h", GUST_LINE),
                         metric_card("P", "Minimum pressure", html.Span(id="emergency-pressure-value"), "hPa", PRESSURE_LINE),
+                        metric_card("≋", "Sea level (vs. mean)", html.Span(id="emergency-sea-level-value"), "m", ACCENT_TEAL),
                         metric_card("◉", "Days recorded", html.Span(id="emergency-observation-value"), "", LIVE_COLOR),
                     ],
                     style={
@@ -563,6 +564,7 @@ layout = html.Div(
     Output("emergency-wind-value", "children"),
     Output("emergency-gust-value", "children"),
     Output("emergency-pressure-value", "children"),
+    Output("emergency-sea-level-value", "children"),
     Output("emergency-observation-value", "children"),
     Output("emergency-day-strip", "children"),
     Output("emergency-wave-chart", "figure"),
@@ -591,6 +593,7 @@ def update_emergency_page(location):
             "",
             "",
             empty_gauge(),
+            "—",
             "—",
             "—",
             "—",
@@ -627,6 +630,7 @@ def update_emergency_page(location):
             "—",
             "—",
             "—",
+            "—",
             "0",
             [],
             empty_chart(),
@@ -657,6 +661,7 @@ def update_emergency_page(location):
             "—",
             "—",
             "—",
+            "—",
             "0",
             [],
             empty_chart(),
@@ -672,7 +677,7 @@ def update_emergency_page(location):
         data["date"] = pd.to_datetime(data["date"], errors="coerce")
         data = data.sort_values("date")
 
-    for col in ["wave_height_max", "wind_speed_max", "wind_gust_max", "pressure_min"]:
+    for col in ["wave_height_max", "wind_speed_max", "wind_gust_max", "pressure_min", "sea_level_height_max"]:
         if col in data.columns:
             data[col] = pd.to_numeric(data[col], errors="coerce")
 
@@ -686,6 +691,7 @@ def update_emergency_page(location):
     wind = current.get("wind_speed_max")
     gust = current.get("wind_gust_max")
     pressure = current.get("pressure_min")
+    sea_level = current.get("sea_level_height_max")
 
     observation_count = len(data)
 
@@ -725,6 +731,10 @@ def update_emergency_page(location):
     wind_value = f"{wind:.1f}" if pd.notna(wind) else "—"
     gust_value = f"{gust:.1f}" if pd.notna(gust) else "—"
     pressure_value = f"{pressure:.0f}" if pd.notna(pressure) else "—"
+    # Missing on ~2% of days — a known upstream Open-Meteo archive gap
+    # (Jan 29 - Feb 9 2025, confirmed directly against their live API),
+    # not a pipeline bug. "—" here is the correct, honest display for it.
+    sea_level_value = f"{sea_level:.2f}" if pd.notna(sea_level) else "—"
 
     if "date" in data.columns and pd.notna(current["date"]):
         updated_text = "Latest observation: " + current["date"].strftime("%d %b %Y")
@@ -877,6 +887,7 @@ def update_emergency_page(location):
         wind_value,
         gust_value,
         pressure_value,
+        sea_level_value,
         str(observation_count),
         day_cards,
         wave_fig,

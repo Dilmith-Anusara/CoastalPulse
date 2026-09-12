@@ -21,11 +21,15 @@ EMERGENCY_VERDICT_TEXT = {
     "Dangerous": "dangerous conditions \u2014 avoid the water",
 }
 
-# suitability_score bands — first-draft, not a settled formula (per the
-# project handoff). Only used to pick a plain-language word, not a
-# validated cutoff.
+# suitability_score is now HCI:Beach (Gunathilake et al. 2023, adapted from
+# Scott/Rutty et al.'s Holiday Climate Index: Beach) — see
+# pipeline/build_gold.py's compute_suitability_score for the formula and
+# citation. These 3 dashboard-facing bands collapse that paper's own 5-tier
+# scale (Impossible 0-19 / Unacceptable 20-39 / Marginal 40-59 / Good 60-79
+# / Excellent 80-100): Not ideal = Impossible+Unacceptable, Fair = Marginal,
+# Good = Good+Excellent.
 SCORE_BANDS = [
-    (70, "Good beach day", "#2ecc71"),
+    (60, "Good beach day", "#2ecc71"),
     (40, "Fair \u2014 some conditions worth checking", "#f39c12"),
     (0, "Not ideal today", "#e74c3c"),
 ]

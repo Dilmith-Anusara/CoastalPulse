@@ -3,13 +3,18 @@ pages/tourism.py — Tourism mode.
 
 gold_tourism_daily columns: location_name, date, wave_height_mean,
 wind_speed_mean, sea_surface_temp_mean, uv_index_mean, precipitation_sum,
-suitability_score, daylight_hours_covered
+suitability_score, daylight_hours_covered, humidity_mean,
+apparent_temperature_mean, air_temperature_max, cloud_cover_mean,
+dominant_weather_code, sunshine_hours_sum, us_aqi_mean
 
 Same verdict/detail split as Emergency: plain sentence + gauge + 7-day
 strip always visible; charts and cross-location map behind "Show details".
 
-suitability_score is a first-draft placeholder formula (per handoff) —
-every place it's shown says so.
+suitability_score is HCI:Beach (Gunathilake et al. 2023, adapting Scott/
+Rutty et al.'s Holiday Climate Index: Beach to Sri Lankan beaches) — see
+pipeline/build_gold.py's compute_suitability_score for the formula and
+citation. Not an ad-hoc placeholder anymore, but still an approximation
+of real tourist comfort, not a guarantee.
 """
 
 import dash
@@ -20,7 +25,7 @@ import pandas as pd
 
 from data_access import get_tourism_data, get_tourism_extras
 from design_system import (
-    CARD, TEXT, MUTED, BORDER, NAVY, NAVY_2, LIVE_COLOR, LIVE_BG,
+    CARD, TEXT, MUTED, BORDER, NAVY, NAVY_2,
     ACCENT_BLUE, ACCENT_ORANGE, ACCENT_TEAL, ACCENT_PINK, ACCENT_PURPLE, ACCENT_GREEN,
     PAGE_STYLE, HERO_STYLE, CARD_STYLE, VERDICT_ZONE_CLASS, DETAIL_ZONE_CLASS,
     section_title, metric_card, chart_card, day_pill, day_strip_grid,
@@ -39,11 +44,13 @@ except ImportError:
 
 dash.register_page(__name__, path="/tourism", name="Tourism")
 
-# Provisional score bands (0-40 Not ideal, 40-70 Fair, 70-100 Good) — used
-# for the gauge bands and as the fallback below. Same "not yet validated"
-# caveat as Emergency's wave thresholds.
+# Score bands (0-40 Not ideal, 40-60 Fair, 60-100 Good) — used for the
+# gauge bands, the cross-location map, and as the fallback below. Matches
+# page_helpers.SCORE_BANDS: collapses HCI:Beach's published 5-tier scale
+# (Gunathilake et al. 2023) into 3 dashboard-facing bands. Kept in sync
+# manually with page_helpers.py — if you change one, change both.
 SCORE_FAIR_MIN = 40
-SCORE_GOOD_MIN = 70
+SCORE_GOOD_MIN = 60
 HISTORY_MIN_ROWS = 30
 CHART_WINDOW_DAYS = 30
 
@@ -141,20 +148,42 @@ def _rain_band(precip):
     return "Rainy"
 
 
-def _aqi_band(pm25):
-    """Simplified US EPA PM2.5 bands (ug/m3) — plain-language only, not
-    an official AQI calculation."""
-    if pm25 is None or pd.isna(pm25):
+def _us_aqi_band(aqi):
+    """Official US EPA AQI bands — aqi here is Open-Meteo's own us_aqi
+    (a real computed index combining PM2.5/PM10/ozone/NO2/SO2/CO), not a
+    PM2.5-only approximation like the old _aqi_band it replaced."""
+    if aqi is None or pd.isna(aqi):
         return "—"
-    if pm25 <= 12:
+    if aqi <= 50:
         return "Good"
-    if pm25 <= 35.4:
+    if aqi <= 100:
         return "Moderate"
-    if pm25 <= 55.4:
+    if aqi <= 150:
         return "Unhealthy for sensitive groups"
-    if pm25 <= 150.4:
+    if aqi <= 200:
         return "Unhealthy"
-    return "Very unhealthy"
+    if aqi <= 300:
+        return "Very unhealthy"
+    return "Hazardous"
+
+
+# WMO weather codes actually observed in this dataset (per the EDA
+# notebook's frequency table) — not the full WMO code list, just the
+# ones Sri Lankan coastal weather actually produces.
+_WMO_LABELS = {
+    0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
+    45: "Fog", 48: "Depositing rime fog",
+    51: "Light drizzle", 53: "Moderate drizzle", 55: "Dense drizzle",
+    61: "Slight rain", 63: "Moderate rain", 65: "Heavy rain",
+    80: "Slight rain showers", 81: "Moderate rain showers", 82: "Violent rain showers",
+    95: "Thunderstorm",
+}
+
+
+def _weather_label(code):
+    if code is None or pd.isna(code):
+        return "—"
+    return _WMO_LABELS.get(int(code), "Mixed conditions")
 
 
 def _map_hover_text(location_name, score):
@@ -190,9 +219,10 @@ layout = html.Div(
         html.Div(
             [
                 html.Div(
-                    "Suitability score is a first-draft placeholder formula, "
-                    "not a validated or authoritative metric — treat it as a "
-                    "rough guide.",
+                    "Suitability score is HCI:Beach, a published tourism-climate "
+                    "index (Gunathilake et al. 2023) adapted for Sri Lankan "
+                    "beaches — a research approximation of comfort, not an "
+                    "authoritative guarantee.",
                     style={
                         "backgroundColor": "#fff8e1", "padding": "12px 16px",
                         "borderLeft": f"4px solid {ACCENT_ORANGE}", "borderRadius": "6px",
@@ -211,8 +241,8 @@ layout = html.Div(
                 ),
 
                 section_title(
-                    "Right now: surf & air quality",
-                    "Latest available hourly readings — a snapshot, not the daylight-hours average used above.",
+                    "Surf detail",
+                    "Swell and wave period — latest available hourly readings for today, computed the same daylight-hours-mean way as everything above.",
                 ),
                 html.Div(
                     [],
@@ -301,7 +331,12 @@ def update_tourism_page(location):
         data["date"] = pd.to_datetime(data["date"], errors="coerce")
         data = data.sort_values("date")
 
-    for col in ["wave_height_mean", "wind_speed_mean", "sea_surface_temp_mean", "uv_index_mean", "precipitation_sum", "suitability_score", "daylight_hours_covered"]:
+    for col in [
+        "wave_height_mean", "wind_speed_mean", "sea_surface_temp_mean", "uv_index_mean",
+        "precipitation_sum", "suitability_score", "daylight_hours_covered",
+        "humidity_mean", "apparent_temperature_mean", "air_temperature_max",
+        "cloud_cover_mean", "dominant_weather_code", "sunshine_hours_sum", "us_aqi_mean",
+    ]:
         if col in data.columns:
             data[col] = pd.to_numeric(data[col], errors="coerce")
 
@@ -388,33 +423,42 @@ def update_tourism_page(location):
     wind_val = latest.get("wind_speed_mean")
     uv_val = latest.get("uv_index_mean")
     precip_val = latest.get("precipitation_sum")
-    daylight_val = latest.get("daylight_hours_covered")
-    daylight_text = f"{daylight_val:.1f}" if pd.notna(daylight_val) else "—"
+
+    humidity_val = latest.get("humidity_mean")
+    feels_like_val = latest.get("apparent_temperature_mean")
+    sunshine_val = latest.get("sunshine_hours_sum")
+    weather_text = _weather_label(latest.get("dominant_weather_code"))
+    cloud_val = latest.get("cloud_cover_mean")
+    weather_note = f"{cloud_val:.0f}% cloud cover" if pd.notna(cloud_val) else None
+    aqi_val = latest.get("us_aqi_mean")
 
     chips = [
+        metric_card("\u2601", "Weather", weather_text, "", accent=ACCENT_PURPLE, note=weather_note),
+        metric_card("\U0001F321", "Feels like", f"{feels_like_val:.0f}" if pd.notna(feels_like_val) else "\u2014", "\u00b0C", accent=ACCENT_PINK),
         metric_card("\U0001F30A", "Wave height", f"{wave_val:.2f}" if pd.notna(wave_val) else "\u2014", "m", accent=ACCENT_BLUE, note=wave_label),
         metric_card("\U0001F4A8", "Wind speed", f"{wind_val:.1f}" if pd.notna(wind_val) else "\u2014", "km/h", accent=ACCENT_PURPLE),
+        metric_card("\U0001F4A7", "Humidity", f"{humidity_val:.0f}" if pd.notna(humidity_val) else "\u2014", "%", accent=ACCENT_BLUE),
         metric_card("\u2600", "UV index", f"{uv_val:.1f}" if pd.notna(uv_val) else "\u2014", "", accent=ACCENT_ORANGE, note=uv_label),
         metric_card("\U0001F327", "Rainfall", f"{precip_val:.1f}" if pd.notna(precip_val) else "\u2014", "mm", accent=ACCENT_TEAL, note=rain_label),
         metric_card("\U0001F321", "Sea temp", sst_text, "", accent=ACCENT_PINK),
-        metric_card("\u25d1", "Daylight covered", daylight_text, "hrs", accent=LIVE_COLOR),
+        metric_card("\u2600", "Sunshine", f"{sunshine_val:.1f}" if pd.notna(sunshine_val) else "\u2014", "hrs", accent=ACCENT_ORANGE),
+        metric_card("\U0001F4A8", "Air quality", f"{aqi_val:.0f}" if pd.notna(aqi_val) else "\u2014", "AQI", accent=ACCENT_GREEN, note=_us_aqi_band(aqi_val)),
     ]
 
-    # --- Surf & air quality — latest hourly snapshot from silver_hourly,
-    # not part of gold_tourism_daily. Degrades to an empty grid rather
-    # than crashing the page if the extra query fails.
+    # --- Surf detail — latest hourly snapshot from silver_hourly, not
+    # part of gold_tourism_daily (swell/wave-period aren't Gold fields).
+    # Degrades to an empty grid rather than crashing the page if the
+    # extra query fails.
     try:
         extras = get_tourism_extras(location)
     except Exception:
         extras = {}
 
-    pm25_val = extras.get("pm25_mean")
     swell_height_val = extras.get("swell_height_mean")
     swell_period_val = extras.get("swell_period_mean")
     wave_period_val = extras.get("wave_period_mean")
 
     extra_chips = [
-        metric_card("\U0001F4A8", "Air quality", f"{pm25_val:.0f}" if pd.notna(pm25_val) else "—", "µg/m³", accent=ACCENT_GREEN, note=_aqi_band(pm25_val)),
         metric_card("\U0001F30A", "Swell height", f"{swell_height_val:.2f}" if pd.notna(swell_height_val) else "—", "m", accent=ACCENT_BLUE),
         metric_card("⏱", "Swell period", f"{swell_period_val:.1f}" if pd.notna(swell_period_val) else "—", "s", accent=ACCENT_PURPLE),
         metric_card("\U0001F30A", "Wave period", f"{wave_period_val:.1f}" if pd.notna(wave_period_val) else "—", "s", accent=ACCENT_TEAL),

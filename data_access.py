@@ -122,6 +122,47 @@ def _validate_location(location: str | None):
         )
 
 
+def _fetch_all_rows(table: str, select: str = "*", order: str | list[str] | None = None, eq: tuple | None = None) -> list:
+    """PostgREST caps a single response at 1000 rows regardless of how
+    many actually match. get_emergency_data()/get_tourism_data() with
+    location=None (8,190 rows each) were silently truncated to the first
+    1000 — chronologically Jan 1 to Mar 8 2025 — meaning every "latest
+    day" read from an all-locations fetch (Emergency's map, Overview's
+    live stats/map, Tourism's cross-location view) was quietly showing
+    13+ month-old data as "today" instead of raising or visibly failing.
+    Page through with .range() until a short page confirms the end.
+
+    `order` MUST fully disambiguate ties across the whole table (pass a
+    list of columns, e.g. ["date", "location_name"], not just one) — a
+    single non-unique sort column (just "date": 15 rows share each one)
+    lets Postgres return tied rows in a different relative order between
+    separate page requests, which silently duplicates some rows and
+    drops others across page boundaries. Caught this via a row-count
+    mismatch after merging two "fully paginated" fetches — 8211 rows
+    instead of the expected 8190, from 10-11 duplicated/dropped rows
+    each with only "date" as the sort key.
+    """
+    rows = []
+    page_size = 1000
+    start = 0
+    order_cols = [order] if isinstance(order, str) else (order or [])
+    while True:
+        query = get_client().table(table).select(select)
+        if eq:
+            query = query.eq(*eq)
+        for col in order_cols:
+            query = query.order(col)
+        resp = query.range(start, start + page_size - 1).execute()
+        batch = resp.data
+        if not batch:
+            break
+        rows.extend(batch)
+        start += page_size
+        if len(batch) < page_size:
+            break
+    return rows
+
+
 # --- Data freshness -----------------------------------------------------------
 
 @cache_stub
@@ -162,11 +203,9 @@ def get_emergency_data(location: str | None = None) -> pd.DataFrame:
     a subset; that's still an open question with the team, see handoff).
     """
     _validate_location(location)
-    query = get_client().table("gold_emergency_daily").select("*")
-    if location:
-        query = query.eq("location_name", location)
-    resp = query.order("date").execute()
-    df = pd.DataFrame(resp.data)
+    eq = ("location_name", location) if location else None
+    rows = _fetch_all_rows("gold_emergency_daily", order=["date", "location_name"], eq=eq)
+    df = pd.DataFrame(rows)
     if not df.empty:
         df["date"] = pd.to_datetime(df["date"])
     return df
@@ -178,20 +217,43 @@ def get_emergency_data(location: str | None = None) -> pd.DataFrame:
 def get_tourism_data(location: str | None = None) -> pd.DataFrame:
     """
     Pulls from gold_tourism_daily: daylight-hours (06:00-18:00) MEAN metrics
-    plus a first-draft suitability score. sea_surface_temp_mean will be null
-    for the 5 TOURISM_ONLY locations (no marine_ocean fetch) — the UI layer
-    is responsible for showing an explanatory note, not a blank panel.
+    plus suitability_score (HCI:Beach — see pipeline/build_gold.py's
+    compute_suitability_score for the formula/citation). sea_surface_temp_mean
+    will be null for the 5 TOURISM_ONLY locations (no marine_ocean fetch) —
+    the UI layer is responsible for showing an explanatory note, not a
+    blank panel.
     """
     _validate_location(location)
-    query = get_client().table("gold_tourism_daily").select("*")
-    if location:
-        query = query.eq("location_name", location)
-    resp = query.order("date").execute()
-    df = pd.DataFrame(resp.data)
+    eq = ("location_name", location) if location else None
+    rows = _fetch_all_rows("gold_tourism_daily", order=["date", "location_name"], eq=eq)
+    df = pd.DataFrame(rows)
     if not df.empty:
         df["date"] = pd.to_datetime(df["date"])
         df["is_tourism_only"] = df["location_name"].isin(TOURISM_ONLY)
     return df
+
+
+# --- Analytics mode ---------------------------------------------------------
+
+@cache_stub
+def get_analytics_data() -> pd.DataFrame:
+    """
+    Merges gold_emergency_daily and gold_tourism_daily on (location_name,
+    date) for the Analytics page. Deliberately reads Gold, not
+    silver_hourly — Gold already has daily-resolution versions of nearly
+    every indicator the course's EDA requirement names (temperature,
+    rainfall, humidity, wind speed, pressure) plus the marine ones, at
+    8,190 rows total instead of Silver's 196,560 — no reason to pull the
+    full hourly table for daily-resolution trend/comparison/correlation
+    charts.
+    """
+    em = get_emergency_data()
+    tm = get_tourism_data()
+    if em.empty or tm.empty:
+        return pd.DataFrame()
+    merged = pd.merge(em, tm, on=["location_name", "date"], how="outer", suffixes=("_em", "_tm"))
+    merged["month"] = merged["date"].dt.to_period("M").astype(str)
+    return merged
 
 
 # --- Tourism mode: extras from silver_hourly --------------------------------
@@ -200,12 +262,11 @@ def get_tourism_data(location: str | None = None) -> pd.DataFrame:
 def get_tourism_extras(location: str) -> dict:
     """
     Daylight-hours (06:00-18:00) means for silver_hourly columns that
-    aren't in gold_tourism_daily but matter to a tourist deciding whether
-    to go out today: air quality (pm25) and surf detail (swell height,
-    swell period, wave period). Computed on the fly from the latest
-    calendar day of raw hourly data rather than added to the Gold table,
-    since these are supplementary "nice to know" fields, not part of the
-    daily suitability formula.
+    still aren't in gold_tourism_daily: surf detail (swell height, swell
+    period, wave period). Computed on the fly from the latest calendar
+    day of raw hourly data. (Air quality used to live here too, computed
+    from raw pm25 — superseded once us_aqi_mean, Open-Meteo's real EPA
+    AQI calculation, was added directly to Gold. Use that instead.)
 
     Returns {} if no rows are found (mirrors get_emergency_data /
     get_tourism_data returning an empty DataFrame rather than raising for
@@ -219,7 +280,7 @@ def get_tourism_extras(location: str) -> dict:
     resp = (
         get_client()
         .table("silver_hourly")
-        .select("timestamp, pm25, swell_height, swell_period, wave_period")
+        .select("timestamp, swell_height, swell_period, wave_period")
         .eq("location_name", location)
         .order("timestamp", desc=True)
         .limit(48)
@@ -238,7 +299,6 @@ def get_tourism_extras(location: str) -> dict:
 
     means = daylight_df.mean(numeric_only=True)
     return {
-        "pm25_mean": means.get("pm25"),
         "swell_height_mean": means.get("swell_height"),
         "swell_period_mean": means.get("swell_period"),
         "wave_period_mean": means.get("wave_period"),

@@ -11,10 +11,21 @@ Fisherman mode has no Gold table — SARIMA reads silver_hourly directly.
 This is a separate, less-frequent-cadence script from fetch_data.py
 (reads Silver, doesn't touch the source APIs).
 
-*** COLUMN NAMES: confirmed atmospheric_pressure (not "pressure") from real ***
-*** silver_hourly schema. Other columns (wave_height, wind_speed, wind_gust, ***
-*** air_temperature, uv_index, precipitation, location_name, timestamp) are ***
-*** still assumptions pending an information_schema.columns check. ***
+*** COLUMN NAMES: all confirmed against the real silver_hourly schema. ***
+
+Extended after the general-EDA pass (validation_scripts/eda_weather_indicators.ipynb)
+to use the fields added to Silver in that same session: sea_level_height_max
+in Emergency (closes the "no endpoint wired up yet" gap), and
+humidity/apparent_temperature/air_temperature_max/cloud_cover/
+dominant_weather_code/sunshine_hours/us_aqi in Tourism. apparent_temperature
+is kept for the dashboard's "feels like" display; air_temperature_max is
+kept separately because the HCI:Beach suitability formula needs raw
+temperature (it does its own humidity adjustment — see
+compute_suitability_score). weather_code went into Tourism but not
+Emergency because EDA found zero thunderstorm codes anywhere in the dataset.
+
+suitability_score is now HCI:Beach (Gunathilake et al. 2023), not an ad-hoc
+formula — see compute_suitability_score's docstring for the citation.
 """
 
 import os
@@ -72,6 +83,7 @@ def ensure_gold_tables(conn):
             pressure_min    NUMERIC,
             classification  TEXT,         -- 'Safe' | 'Caution' | 'Dangerous'
             hours_covered   INTEGER,      -- sanity check: should be 24
+            sea_level_height_max NUMERIC,
             PRIMARY KEY (location_name, date)
         );
 
@@ -85,13 +97,38 @@ def ensure_gold_tables(conn):
             precipitation_sum    NUMERIC,
             suitability_score    NUMERIC,  -- 0-100, see compute_suitability_score()
             daylight_hours_covered INTEGER, -- sanity check: should be 12
+            humidity_mean            NUMERIC,
+            apparent_temperature_mean NUMERIC,
+            air_temperature_max      NUMERIC,
+            cloud_cover_mean         NUMERIC,
+            dominant_weather_code    NUMERIC,
+            sunshine_hours_sum       NUMERIC,
+            us_aqi_mean              NUMERIC,
             PRIMARY KEY (location_name, date)
         );
         """
     )
     conn.commit()
     cur.close()
-    # Same PGRST205 schema-cache gotcha as Bronze/Silver setup — reload after DDL
+    # Same PGRST205 schema-cache gotcha as Bronze/Silver setup — reload after DDL.
+    # ADD COLUMN IF NOT EXISTS here too, same reason as Silver's migration:
+    # CREATE TABLE IF NOT EXISTS alone won't add columns to tables that
+    # already exist in production.
+    cur = conn.cursor()
+    cur.execute(
+        """
+        ALTER TABLE gold_emergency_daily ADD COLUMN IF NOT EXISTS sea_level_height_max NUMERIC;
+        ALTER TABLE gold_tourism_daily ADD COLUMN IF NOT EXISTS humidity_mean NUMERIC;
+        ALTER TABLE gold_tourism_daily ADD COLUMN IF NOT EXISTS apparent_temperature_mean NUMERIC;
+        ALTER TABLE gold_tourism_daily ADD COLUMN IF NOT EXISTS air_temperature_max NUMERIC;
+        ALTER TABLE gold_tourism_daily ADD COLUMN IF NOT EXISTS cloud_cover_mean NUMERIC;
+        ALTER TABLE gold_tourism_daily ADD COLUMN IF NOT EXISTS dominant_weather_code NUMERIC;
+        ALTER TABLE gold_tourism_daily ADD COLUMN IF NOT EXISTS sunshine_hours_sum NUMERIC;
+        ALTER TABLE gold_tourism_daily ADD COLUMN IF NOT EXISTS us_aqi_mean NUMERIC;
+        """
+    )
+    conn.commit()
+    cur.close()
     cur = conn.cursor()
     cur.execute("NOTIFY pgrst, 'reload schema';")
     conn.commit()
@@ -105,7 +142,9 @@ def ensure_gold_tables(conn):
 def load_silver(conn, location_name: str) -> pd.DataFrame:
     query = """
         SELECT timestamp, wave_height, wind_speed, wind_gust, atmospheric_pressure,
-               sea_surface_temp, uv_index, precipitation
+               sea_surface_temp, uv_index, precipitation, sea_level_height,
+               humidity, apparent_temperature, air_temperature, cloud_cover,
+               weather_code, sunshine_duration, us_aqi
         FROM silver_hourly
         WHERE location_name = %s
         ORDER BY timestamp;
@@ -139,6 +178,7 @@ def build_emergency_daily(df: pd.DataFrame, location_name: str) -> pd.DataFrame:
         wind_gust_max=("wind_gust", "max"),
         pressure_min=("atmospheric_pressure", "min"),
         hours_covered=("timestamp", "count"),
+        sea_level_height_max=("sea_level_height", "max"),
     ).reset_index()
 
     grouped["classification"] = grouped["wave_height_max"].apply(classify_wave_height)
@@ -146,6 +186,7 @@ def build_emergency_daily(df: pd.DataFrame, location_name: str) -> pd.DataFrame:
     return grouped[[
         "location_name", "date", "wave_height_max", "wind_speed_max",
         "wind_gust_max", "pressure_min", "classification", "hours_covered",
+        "sea_level_height_max",
     ]]
 
 
@@ -153,35 +194,105 @@ def build_emergency_daily(df: pd.DataFrame, location_name: str) -> pd.DataFrame:
 # Tourism: daylight-hours-only mean + suitability score
 # ---------------------------------------------------------------------------
 
+# HCI:Beach rating tables — exact breakpoints from Gunathilake et al. 2023
+# ("Performances of Holiday Climate Index (HCI) for Urban and Beach
+# Destinations in Sri Lanka under Changing Climate", Climate 11(3):48),
+# Table A1 — itself adapted from Scott, Rutty, Amelung & Tang (2016) and
+# Rutty et al. (2020)'s original HCI:Beach. This is the same index applied
+# by that paper directly to Sri Lankan beach destinations using real DoM
+# climate data (1990-2018), giving published scores (26-61 for west/south
+# coast beaches across monsoon seasons) to sanity-check against.
+#
+# Each (min, max, rate) band maps a raw value to a rating on a roughly
+# -10..10 scale — negative ratings ARE part of the real table (extreme
+# heat/cold/rain/wind score below zero, not just "0"), not a bug.
+_TC_TABLE = [
+    (-math.inf, 9.9, -10), (10, 14.99, -5), (15, 16.99, 0), (17, 17.99, 1),
+    (18, 18.99, 2), (19, 19.99, 3), (20, 20.99, 4), (21, 21.99, 5),
+    (22, 22.99, 6), (23, 25.99, 7), (26, 27.99, 9), (28, 30.99, 10),
+    (31, 32.99, 9), (33, 33.99, 8), (34, 34.99, 7), (35, 35.99, 6),
+    (36, 36.99, 5), (37, 37.99, 4), (38, 38.99, 2), (39, math.inf, 0),
+]
+
+_AESTHETIC_TABLE = [
+    (0, 0.99, 8), (1, 14.99, 9), (15, 25.99, 10), (26, 35.99, 9),
+    (36, 45.99, 8), (46, 55.99, 7), (56, 65.99, 6), (66, 75.99, 5),
+    (76, 85.99, 4), (86, 95.99, 3), (96, 100, 2),
+]
+
+_PRECIPITATION_TABLE = [
+    (0, 0.01, 10), (0.01, 2.99, 9), (3, 5.99, 8), (6, 8.99, 6),
+    (9, 11.99, 4), (12, 24.99, 0), (25, math.inf, -1),
+]
+
+_WIND_TABLE = [
+    (0, 0.59, 8), (0.6, 9.99, 10), (10, 19.99, 9), (20, 29.99, 8),
+    (30, 39.99, 6), (40, 49.99, 3), (50, 69.99, 0), (70, math.inf, -10),
+]
+
+
+def _rate_from_table(value, table):
+    if value is None or pd.isna(value):
+        return None
+    for lo, hi, rate in table:
+        if lo <= value <= hi:
+            return rate
+    return table[0][2] if value < table[0][0] else table[-1][2]
+
+
+def thermal_comfort_value(t_max: float, rh_mean: float) -> float:
+    """TC per Scott/Rutty et al.'s humidex-style formula. T is daily MAX
+    air temperature — deliberately NOT apparent_temperature, which would
+    double-count humidity since this formula already does its own
+    humidity adjustment. H is mean relative humidity (%)."""
+    return t_max + (5 / 9) * (
+        6.112 * 10 ** ((7.5 * t_max) / (237.7 + t_max)) * (rh_mean / 100) - 10
+    )
+
+
 def compute_suitability_score(row) -> float:
     """
-    Placeholder 0-100 beach suitability formula. Not specified in the handoff —
-    treat this as a first draft to refine, not a settled design decision.
-    Penalizes rough seas, strong wind, rain, and extreme UV.
-    Note: silver_hourly has no air_temperature column (never fetched from
-    Weather API into Silver) — sea_surface_temp is used as a proxy signal
-    but isn't currently scored in this formula; add a term here if you
-    want water temperature to factor into the suitability score.
+    HCI:Beach = 2(TC) + 4(A) + 3(P) + W — see _TC_TABLE etc. above for the
+    citation. Replaces the earlier ad-hoc placeholder formula (which
+    scored wave height, wind, rain, and UV with hand-picked coefficients)
+    with a cited, peer-reviewed methodology.
+
+    The raw weighted sum can go as low as -25 (matching the paper's own
+    "Dangerous" band, e.g. extreme heat + full cloud cover + heavy rain +
+    high wind all scoring negative simultaneously); clamped to a 0 floor
+    here since this column is documented/consumed elsewhere as 0-100.
+
+    Returns None (not 0) when a required input is missing, rather than
+    silently scoring on partial data — a missing day should show as
+    "no score" on the dashboard, not a fake low score.
     """
-    score = 100.0
+    t_max = row["air_temperature_max"]
+    rh_mean = row["humidity_mean"]
+    cloud_mean = row["cloud_cover_mean"]
+    precip_sum = row["precipitation_sum"]
+    wind_mean = row["wind_speed_mean"]
 
-    # Wave height penalty (calmer = better for tourism, unlike Emergency's danger framing)
-    if pd.notna(row["wave_height_mean"]):
-        score -= min(row["wave_height_mean"] * 15, 40)
+    tc_rate = None
+    if pd.notna(t_max) and pd.notna(rh_mean):
+        tc_rate = _rate_from_table(thermal_comfort_value(t_max, rh_mean), _TC_TABLE)
 
-    # Wind penalty (km/h, per the corrected Silver units)
-    if pd.notna(row["wind_speed_mean"]):
-        score -= min(max(row["wind_speed_mean"] - 15, 0) * 0.8, 25)
+    a_rate = _rate_from_table(cloud_mean, _AESTHETIC_TABLE)
+    p_rate = _rate_from_table(precip_sum, _PRECIPITATION_TABLE)
+    w_rate = _rate_from_table(wind_mean, _WIND_TABLE)
 
-    # Rain penalty
-    if pd.notna(row["precipitation_sum"]):
-        score -= min(row["precipitation_sum"] * 5, 25)
+    if any(r is None for r in (tc_rate, a_rate, p_rate, w_rate)):
+        return None
 
-    # UV: too high is a caution, not necessarily "bad", so a mild penalty only above 8
-    if pd.notna(row["uv_index_mean"]) and row["uv_index_mean"] > 8:
-        score -= min((row["uv_index_mean"] - 8) * 3, 10)
+    raw_score = 2 * tc_rate + 4 * a_rate + 3 * p_rate + w_rate
+    return round(max(raw_score, 0), 1)
 
-    return round(max(score, 0), 1)
+
+def _mode_or_none(s: pd.Series):
+    """Weather conditions aren't meaningfully averageable — the mode (most
+    common code during daylight hours) answers "what did today mostly
+    look like", which a mean of numeric codes would not."""
+    m = s.mode()
+    return m.iloc[0] if not m.empty else None
 
 
 def build_tourism_daily(df: pd.DataFrame, location_name: str) -> pd.DataFrame:
@@ -194,6 +305,13 @@ def build_tourism_daily(df: pd.DataFrame, location_name: str) -> pd.DataFrame:
         uv_index_mean=("uv_index", "mean"),
         precipitation_sum=("precipitation", "sum"),
         daylight_hours_covered=("timestamp", "count"),
+        humidity_mean=("humidity", "mean"),
+        apparent_temperature_mean=("apparent_temperature", "mean"),
+        air_temperature_max=("air_temperature", "max"),
+        cloud_cover_mean=("cloud_cover", "mean"),
+        dominant_weather_code=("weather_code", _mode_or_none),
+        sunshine_hours_sum=("sunshine_duration", lambda s: round(s.sum() / 3600, 2)),
+        us_aqi_mean=("us_aqi", "mean"),
     ).reset_index()
 
     grouped["suitability_score"] = grouped.apply(compute_suitability_score, axis=1)
@@ -202,6 +320,8 @@ def build_tourism_daily(df: pd.DataFrame, location_name: str) -> pd.DataFrame:
         "location_name", "date", "wave_height_mean", "wind_speed_mean",
         "sea_surface_temp_mean", "uv_index_mean", "precipitation_sum",
         "suitability_score", "daylight_hours_covered",
+        "humidity_mean", "apparent_temperature_mean", "air_temperature_max", "cloud_cover_mean",
+        "dominant_weather_code", "sunshine_hours_sum", "us_aqi_mean",
     ]]
 
 
@@ -216,20 +336,23 @@ def upsert_emergency(conn, df: pd.DataFrame):
             """
             INSERT INTO gold_emergency_daily
                 (location_name, date, wave_height_max, wind_speed_max,
-                 wind_gust_max, pressure_min, classification, hours_covered)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                 wind_gust_max, pressure_min, classification, hours_covered,
+                 sea_level_height_max)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (location_name, date) DO UPDATE SET
                 wave_height_max = EXCLUDED.wave_height_max,
                 wind_speed_max = EXCLUDED.wind_speed_max,
                 wind_gust_max = EXCLUDED.wind_gust_max,
                 pressure_min = EXCLUDED.pressure_min,
                 classification = EXCLUDED.classification,
-                hours_covered = EXCLUDED.hours_covered;
+                hours_covered = EXCLUDED.hours_covered,
+                sea_level_height_max = EXCLUDED.sea_level_height_max;
             """,
             (
                 clean_value(r["location_name"]), clean_value(r["date"]), clean_value(r["wave_height_max"]),
                 clean_value(r["wind_speed_max"]), clean_value(r["wind_gust_max"]), clean_value(r["pressure_min"]),
                 clean_value(r["classification"]), int(r["hours_covered"]),
+                clean_value(r["sea_level_height_max"]),
             ),
         )
     conn.commit()
@@ -244,8 +367,10 @@ def upsert_tourism(conn, df: pd.DataFrame):
             INSERT INTO gold_tourism_daily
                 (location_name, date, wave_height_mean, wind_speed_mean,
                  sea_surface_temp_mean, uv_index_mean, precipitation_sum,
-                 suitability_score, daylight_hours_covered)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 suitability_score, daylight_hours_covered,
+                 humidity_mean, apparent_temperature_mean, air_temperature_max, cloud_cover_mean,
+                 dominant_weather_code, sunshine_hours_sum, us_aqi_mean)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (location_name, date) DO UPDATE SET
                 wave_height_mean = EXCLUDED.wave_height_mean,
                 wind_speed_mean = EXCLUDED.wind_speed_mean,
@@ -253,13 +378,24 @@ def upsert_tourism(conn, df: pd.DataFrame):
                 uv_index_mean = EXCLUDED.uv_index_mean,
                 precipitation_sum = EXCLUDED.precipitation_sum,
                 suitability_score = EXCLUDED.suitability_score,
-                daylight_hours_covered = EXCLUDED.daylight_hours_covered;
+                daylight_hours_covered = EXCLUDED.daylight_hours_covered,
+                humidity_mean = EXCLUDED.humidity_mean,
+                apparent_temperature_mean = EXCLUDED.apparent_temperature_mean,
+                air_temperature_max = EXCLUDED.air_temperature_max,
+                cloud_cover_mean = EXCLUDED.cloud_cover_mean,
+                dominant_weather_code = EXCLUDED.dominant_weather_code,
+                sunshine_hours_sum = EXCLUDED.sunshine_hours_sum,
+                us_aqi_mean = EXCLUDED.us_aqi_mean;
             """,
             (
                 clean_value(r["location_name"]), clean_value(r["date"]), clean_value(r["wave_height_mean"]),
                 clean_value(r["wind_speed_mean"]), clean_value(r["sea_surface_temp_mean"]),
                 clean_value(r["uv_index_mean"]), clean_value(r["precipitation_sum"]),
                 clean_value(r["suitability_score"]), int(r["daylight_hours_covered"]),
+                clean_value(r["humidity_mean"]), clean_value(r["apparent_temperature_mean"]),
+                clean_value(r["air_temperature_max"]), clean_value(r["cloud_cover_mean"]),
+                clean_value(r["dominant_weather_code"]), clean_value(r["sunshine_hours_sum"]),
+                clean_value(r["us_aqi_mean"]),
             ),
         )
     conn.commit()
@@ -297,31 +433,61 @@ EMERGENCY_LOCATIONS = ALL_LOCATION_NAMES
 TOURISM_LOCATIONS = ALL_LOCATION_NAMES
 
 
+def _run_with_reconnect(fn, *args, retries=3):
+    """A single long-lived connection across all 15 locations x 2 modes
+    (~15-20 minutes of row-by-row upserts) was observed dropping mid-run
+    with 'server closed the connection unexpectedly' — a transient
+    Supabase pooler timeout, not a data problem (everything before the
+    drop had already committed successfully). Retrying with a fresh
+    connection is simpler and more robust than trying to keep one
+    connection alive for the whole run.
+    """
+    for attempt in range(retries):
+        conn = psycopg2.connect(SUPABASE_DB_URL)
+        try:
+            # If THIS connection dies mid-transaction like the last run
+            # did, don't let the orphaned backend sit "idle in
+            # transaction" indefinitely holding locks that block a future
+            # run's ALTER TABLE (exactly what happened: a crashed upsert
+            # blocked ensure_gold_tables() for 14+ minutes until manually
+            # found and killed via pg_terminate_backend). Let Postgres
+            # clean up after itself instead.
+            with conn.cursor() as c:
+                c.execute("SET idle_in_transaction_session_timeout = '30s';")
+            conn.commit()
+            result = fn(conn, *args)
+            conn.close()
+            return result
+        except psycopg2.OperationalError as e:
+            conn.close()
+            if attempt == retries - 1:
+                raise
+            print(f"  connection dropped ({e}); retrying ({attempt + 2}/{retries})...")
+
+
 def main():
-    conn = psycopg2.connect(SUPABASE_DB_URL)
-    ensure_gold_tables(conn)
+    _run_with_reconnect(ensure_gold_tables)
 
     for location in EMERGENCY_LOCATIONS:
         print(f"[Emergency] Aggregating {location}...")
-        silver_df = load_silver(conn, location)
+        silver_df = _run_with_reconnect(load_silver, location)
         if silver_df.empty:
             print(f"  no silver rows for {location}, skipping")
             continue
         gold_df = build_emergency_daily(silver_df, location)
-        upsert_emergency(conn, gold_df)
+        _run_with_reconnect(upsert_emergency, gold_df)
         print(f"  wrote {len(gold_df)} daily rows")
 
     for location in TOURISM_LOCATIONS:
         print(f"[Tourism] Aggregating {location}...")
-        silver_df = load_silver(conn, location)
+        silver_df = _run_with_reconnect(load_silver, location)
         if silver_df.empty:
             print(f"  no silver rows for {location}, skipping")
             continue
         gold_df = build_tourism_daily(silver_df, location)
-        upsert_tourism(conn, gold_df)
+        _run_with_reconnect(upsert_tourism, gold_df)
         print(f"  wrote {len(gold_df)} daily rows")
 
-    conn.close()
     print("\nDone. Spot-check a few rows against validation_report.md's known dates (e.g. Ditwah landfall) before trusting this.")
 
 
