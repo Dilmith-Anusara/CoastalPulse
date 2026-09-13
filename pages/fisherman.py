@@ -11,29 +11,47 @@ If the pipeline hasn't been run yet for the selected location (or ever),
 get_fisherman_forecast() returns an empty DataFrame — this page says so
 explicitly rather than showing an empty chart with no explanation.
 
-Beyond the two charts, this page also answers the questions a fisherman
-actually has, all derived from data already being fetched here (no new
-pipeline work):
-  - a go/no-go verdict based on the latest *observed* wave height (not the
-    forecast — the most recent real reading is the more honest answer to
-    "right now"), using the same Safe/Caution/Dangerous thresholds
-    pipeline/build_gold.py's classify_wave_height() uses for Emergency;
-  - a current-conditions snapshot (wind, swell, sea temp) from that same
+LAYOUT — now matches Emergency/Tourism's structure exactly, which this
+page originally skipped:
+  - a HERO_STYLE navy gradient card (verdict sentence + wave gauge), a
+    7-day classification strip, and the current-conditions snapshot sit
+    in the always-visible cp-verdict-zone;
+  - both charts sit in cp-detail-zone, hidden until the header's global
+    "Show details" switch is on — previously this page ignored that
+    switch entirely.
+This also answers "is the forecast alone enough info for a fisherman" —
+it wasn't. Beyond the two charts, this page now also gives:
+  - a go/no-go verdict based on the latest *observed* wave height (not
+    the forecast — the most recent real reading is the more honest
+    answer to "right now"), using the same Safe/Caution/Dangerous
+    thresholds pipeline/build_gold.py's classify_wave_height() uses for
+    Emergency, rendered through the same gauge/hero visual language;
+  - a 7-day classification strip and a "how does today compare to
+    history" sentence, reusing get_emergency_data() (gold_emergency_daily)
+    — the exact same Gold table and thresholds Emergency already shows,
+    so a fisherman sees the identical verdict Emergency would give for
+    this location, just framed for going out on a boat instead of
+    swimming;
+  - a current-conditions snapshot (wind, swell, sea temp) from the
     latest silver_hourly row;
   - the calmest/roughest hour in the 48h SARIMA forecast, so the chart
     doesn't have to be read by eye.
+None of this needed new pipeline work — everything above already existed
+in gold_emergency_daily, silver_hourly, or the forecasts table.
 """
 
 import dash
-from dash import html, callback, Input, Output
+from dash import html, dcc, callback, Input, Output
 import plotly.graph_objects as go
 import pandas as pd
 
-from data_access import get_fisherman_forecast, get_fisherman_silver
+from data_access import get_fisherman_forecast, get_fisherman_silver, get_emergency_data
 from design_system import (
-    PAGE_STYLE, TEXT, MUTED, CARD, BORDER, CARD_STYLE,
+    PAGE_STYLE, TEXT, MUTED, CARD_STYLE, HERO_STYLE,
+    VERDICT_ZONE_CLASS, DETAIL_ZONE_CLASS,
     ACCENT_BLUE, ACCENT_PURPLE, ACCENT_ORANGE, ACCENT_GREEN,
-    section_title, metric_card, chart_card, empty_chart,
+    section_title, metric_card, chart_card, day_pill, day_strip_grid,
+    empty_chart, stat_gauge_figure,
 )
 from page_helpers import CLASSIFICATION_COLORS
 
@@ -43,13 +61,18 @@ dash.register_page(__name__, path="/fisherman", name="Fisherman")
 # source of truth for Emergency's classification column) — duplicated here
 # rather than imported since it's a small pipeline-side function, not a
 # shared module; keep these in sync if that function's bands ever change.
+# Also matches pages/emergency.py's own local WAVE_SAFE_MAX/WAVE_CAUTION_MAX
+# — same duplication pattern already established there.
 WAVE_SAFE_MAX = 2.0
 WAVE_CAUTION_MAX = 3.0
+WAVE_GAUGE_MAX = 5.0
 
-# Fishing-specific phrasing — Emergency's EMERGENCY_VERDICT_TEXT is written
-# for "is it safe to swim/be near the coast", not "should a boat go out",
-# so this page uses its own copy against the same classification labels
-# and colors (CLASSIFICATION_COLORS, shared via page_helpers.py).
+HISTORY_MIN_ROWS = 30
+
+# Fishing-specific phrasing — Emergency's copy is written for "is it safe
+# to swim/be near the coast", not "should a boat go out", so this page
+# uses its own sentences against the same classification labels and
+# colors (CLASSIFICATION_COLORS, shared via page_helpers.py).
 _FISHERMAN_VERDICT_TEXT = {
     "Safe": "Good conditions to head out.",
     "Caution": "Rough seas today — experienced crews only, and stay within sight of shore.",
@@ -88,10 +111,43 @@ def _compass(degrees):
     return _COMPASS_POINTS[idx]
 
 
-def _verdict_card(classification, wave_value, observed_time):
-    color, light = _classification_style(classification)
+def _wave_gauge_figure(wave_value, status_color):
+    """Same visual construction as emergency.py's wave gauge (via the
+    shared stat_gauge_figure helper both pages can use), same Safe/
+    Caution/Dangerous bands — a fisherman and a swimmer read the same
+    wave-height gauge, just under different verdict copy.
+    """
+    steps = [
+        {"range": [0, WAVE_SAFE_MAX], "color": "rgba(24,166,115,0.55)"},
+        {"range": [WAVE_SAFE_MAX, WAVE_CAUTION_MAX], "color": "rgba(245,158,11,0.55)"},
+        {"range": [WAVE_CAUTION_MAX, WAVE_GAUGE_MAX], "color": "rgba(227,77,89,0.55)"},
+    ]
+    return stat_gauge_figure(wave_value, WAVE_GAUGE_MAX, status_color, steps, suffix=" m")
+
+
+def _history_context_text(history_wave_series, current_wave, location_label):
+    """Mirrors emergency.py's history_context_text — same full-history
+    percentile comparison, so a fisherman gets the same "how unusual is
+    this" context Emergency already gives, not a plainer version.
+    """
+    if current_wave is None or pd.isna(current_wave):
+        return ""
+    valid = history_wave_series.dropna()
+    if len(valid) < HISTORY_MIN_ROWS:
+        return ""
+    percentile = (valid <= current_wave).mean() * 100
+    if percentile >= 95:
+        return f"Among the roughest days recorded at {location_label} — higher than {percentile:.0f}% of days on record."
+    if percentile >= 70:
+        return f"Higher than {percentile:.0f}% of days recorded at {location_label}."
+    if percentile <= 30:
+        return f"Calmer than usual — lower than {100 - percentile:.0f}% of days recorded at {location_label}."
+    return f"Fairly typical for {location_label} — around the middle of the range recorded here."
+
+
+def _hero_left(classification, wave_value, observed_time, history_note):
+    color, _ = _classification_style(classification)
     verdict_text = _FISHERMAN_VERDICT_TEXT.get(classification, _FISHERMAN_VERDICT_TEXT[None])
-    wave_text = f"{wave_value:.2f} m" if wave_value is not None and pd.notna(wave_value) else "—"
     time_text = (
         "Latest reading: " + observed_time.strftime("%d %b, %H:%M")
         if observed_time is not None and pd.notna(observed_time)
@@ -101,33 +157,56 @@ def _verdict_card(classification, wave_value, observed_time):
     return html.Div(
         [
             html.Div(
-                [
-                    html.Span(
-                        (classification or "UNKNOWN").upper(),
-                        style={
-                            "fontSize": "11px", "fontWeight": "800", "letterSpacing": "0.6px",
-                            "backgroundColor": light, "color": color,
-                            "padding": "6px 12px", "borderRadius": "20px",
-                        },
-                    ),
-                    html.Span(
-                        f"Wave height right now: {wave_text}",
-                        style={"fontSize": "13px", "color": MUTED, "marginLeft": "14px"},
-                    ),
-                ],
+                "CURRENT FISHING CONDITIONS",
                 style={
-                    "display": "flex", "alignItems": "center", "flexWrap": "wrap",
-                    "rowGap": "8px", "marginBottom": "12px",
+                    "fontSize": "10px", "fontWeight": "750", "letterSpacing": "1.4px",
+                    "color": "#8EA6B0", "marginBottom": "20px",
                 },
             ),
-            html.Div(verdict_text, style={"fontSize": "17px", "fontWeight": "650", "color": TEXT, "lineHeight": "1.6"}),
-            html.Div(time_text, style={"fontSize": "11px", "color": MUTED, "marginTop": "10px"}) if time_text else None,
+            html.Div(
+                html.Span(
+                    (classification or "UNKNOWN").upper(),
+                    style={
+                        "fontSize": "11px", "fontWeight": "800", "letterSpacing": "0.6px",
+                        "backgroundColor": f"{color}22", "color": color,
+                        "padding": "7px 12px", "borderRadius": "20px",
+                    },
+                ),
+            ),
+            html.Div(
+                verdict_text,
+                style={
+                    "fontSize": "18px", "fontWeight": "600", "lineHeight": "1.7",
+                    "color": "white", "marginTop": "18px", "maxWidth": "480px",
+                },
+            ),
+            html.Div(history_note, style={"fontSize": "13px", "lineHeight": "1.6", "color": "#B8C9CF", "marginTop": "10px", "maxWidth": "480px"}) if history_note else None,
+            html.Div(time_text, style={"fontSize": "11px", "color": "#718991", "marginTop": "22px"}) if time_text else None,
         ],
-        style={
-            "backgroundColor": CARD, "border": f"2px solid {color}", "borderRadius": "16px",
-            "padding": "26px 28px", "boxShadow": "0 2px 8px rgba(15, 45, 58, 0.035)",
-        },
+        style={"flex": "1"},
     )
+
+
+def _day_strip(daily_df):
+    """Last-7-days classification strip, reusing gold_emergency_daily via
+    get_emergency_data — the exact same source and thresholds Emergency
+    shows, so this page never invents a second definition of Safe/
+    Caution/Dangerous history.
+    """
+    if daily_df is None or daily_df.empty:
+        return []
+    recent = daily_df.tail(7)
+    pills = []
+    for _, row in recent.iterrows():
+        classification = str(row.get("classification", "Unknown"))
+        dot_color, bg_color = _classification_style(classification)
+        date_val = row.get("date")
+        if pd.notna(date_val):
+            day_label, date_label = date_val.strftime("%a"), date_val.strftime("%d %b")
+        else:
+            day_label, date_label = "—", "—"
+        pills.append(day_pill(day_label, date_label, dot_color, bg_color, classification))
+    return pills
 
 
 def _conditions_grid(latest_row):
@@ -221,29 +300,6 @@ def _window_note(forecast_df):
     )
 
 
-layout = html.Div(
-    [
-        html.Div(id="fisherman-verdict-card", style={"marginBottom": "20px"}),
-        html.Div(id="fisherman-conditions-grid", style={"marginBottom": "24px"}),
-        html.Div(id="fisherman-forecast-note", style={"marginBottom": "20px"}),
-        chart_card(
-            "48-hour wave height forecast",
-            "SARIMA model fit on this location's own hourly history — shaded band is the model's 95% prediction interval, not a guarantee.",
-            "fisherman-forecast", height=380,
-        ),
-        html.Div(style={"height": "20px"}),
-        html.Div(id="fisherman-window-note"),
-        html.Div(style={"height": "24px"}),
-        chart_card(
-            "Recent observed conditions",
-            "Real wave height and wind speed from the last 7 days (silver_hourly).",
-            "fisherman-recent-observed", height=360,
-        ),
-    ],
-    style=PAGE_STYLE,
-)
-
-
 def _note_box(text, color=ACCENT_ORANGE, bg="#FFF7E8"):
     return html.Div(
         text,
@@ -255,8 +311,75 @@ def _note_box(text, color=ACCENT_ORANGE, bg="#FFF7E8"):
     )
 
 
+layout = html.Div(
+    [
+        html.Div(
+            [
+                html.Div(
+                    [
+                        html.Div(id="fisherman-hero"),
+                        html.Div(
+                            [
+                                html.Div(
+                                    "WAVE HEIGHT",
+                                    style={
+                                        "fontSize": "10px", "fontWeight": "700", "letterSpacing": "1px",
+                                        "color": "#8EA6B0", "textAlign": "center", "marginBottom": "10px",
+                                    },
+                                ),
+                                dcc.Graph(
+                                    id="fisherman-gauge",
+                                    config={"displayModeBar": False},
+                                    style={"height": "190px", "width": "240px"},
+                                ),
+                            ],
+                            style={"minWidth": "240px"},
+                        ),
+                    ],
+                    style=HERO_STYLE,
+                ),
+                html.Div(
+                    [
+                        section_title("Last 7 days", "How wave conditions looked recently at this location — same data Emergency shows."),
+                        html.Div(id="fisherman-day-strip", style={"display": "grid", "gridTemplateColumns": "repeat(7, minmax(0, 1fr))", "gap": "14px"}),
+                    ],
+                    style=CARD_STYLE,
+                ),
+                html.Div(style={"height": "8px"}),
+                html.Div(id="fisherman-conditions-grid"),
+            ],
+            className=VERDICT_ZONE_CLASS,
+        ),
+        html.Div(style={"height": "8px"}),
+        html.Div(
+            [
+                html.Div(id="fisherman-forecast-note", style={"marginBottom": "20px"}),
+                chart_card(
+                    "48-hour wave height forecast",
+                    "SARIMA model fit on this location's own hourly history — shaded band is the model's 95% prediction interval, not a guarantee.",
+                    "fisherman-forecast", height=380,
+                ),
+                html.Div(style={"height": "20px"}),
+                html.Div(id="fisherman-window-note"),
+                html.Div(style={"height": "24px"}),
+                chart_card(
+                    "Recent observed conditions",
+                    "Real wave height and wind speed from the last 7 days (silver_hourly).",
+                    "fisherman-recent-observed", height=360,
+                ),
+            ],
+            className=DETAIL_ZONE_CLASS,
+        ),
+        html.Div(style={"height": "36px"}),
+    ],
+    style=PAGE_STYLE,
+)
+
+
 @callback(
-    Output("fisherman-verdict-card", "children"),
+    Output("fisherman-hero", "children"),
+    Output("fisherman-gauge", "figure"),
+    Output("fisherman-day-strip", "children"),
     Output("fisherman-conditions-grid", "children"),
     Output("fisherman-forecast-note", "children"),
     Output("fisherman-forecast", "figure"),
@@ -266,26 +389,39 @@ def _note_box(text, color=ACCENT_ORANGE, bg="#FFF7E8"):
 )
 def update_fisherman_page(location):
     if not location:
+        empty_hero = _hero_left(None, None, None, "")
         placeholder = _note_box("Choose a location above to see a forecast.")
-        return None, None, placeholder, empty_chart(), None, empty_chart()
+        return empty_hero, _wave_gauge_figure(0, "#71828C"), [], None, placeholder, empty_chart(), None, empty_chart()
 
     forecast_df = get_fisherman_forecast(location)
     observed_df = get_fisherman_silver(location, days_back=7)
+    daily_df = get_emergency_data(location)
 
     # --------------------------------------------------------
-    # Verdict + current-conditions snapshot — from the latest real
-    # observed row, not the forecast (the most recent actual reading
-    # is the more honest answer to "right now" than a model output).
+    # Hero + gauge + conditions snapshot — from the latest real observed
+    # row, not the forecast (the most recent actual reading is the more
+    # honest answer to "right now" than a model output). The 7-day strip
+    # and history sentence instead use gold_emergency_daily (daily max),
+    # the same source Emergency itself reads from.
     # --------------------------------------------------------
     if not observed_df.empty:
         latest = observed_df.iloc[-1]
-        classification = _classify_wave(latest.get("wave_height"))
-        verdict_card = _verdict_card(classification, latest.get("wave_height"), latest.get("timestamp"))
+        wave_value = latest.get("wave_height")
+        classification = _classify_wave(wave_value)
+        history_note = (
+            _history_context_text(daily_df["wave_height_max"], wave_value, location)
+            if daily_df is not None and not daily_df.empty and "wave_height_max" in daily_df.columns
+            else ""
+        )
+        hero = _hero_left(classification, wave_value, latest.get("timestamp"), history_note)
+        gauge_fig = _wave_gauge_figure(wave_value, _classification_style(classification)[0])
         conditions_grid = _conditions_grid(latest)
     else:
-        verdict_card = _verdict_card(None, None, None)
+        hero = _hero_left(None, None, None, "")
+        gauge_fig = _wave_gauge_figure(0, "#71828C")
         conditions_grid = _conditions_grid(None)
 
+    day_strip = _day_strip(daily_df)
     window_note = _window_note(forecast_df)
 
     if forecast_df.empty:
@@ -355,4 +491,4 @@ def update_fisherman_page(location):
     else:
         observed_fig = empty_chart("No recent observed data for this location")
 
-    return verdict_card, conditions_grid, note, forecast_fig, window_note, observed_fig
+    return hero, gauge_fig, day_strip, conditions_grid, note, forecast_fig, window_note, observed_fig
