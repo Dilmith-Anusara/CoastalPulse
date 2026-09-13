@@ -60,6 +60,12 @@ except Exception as exc:
     EMERGENCY_VERDICT_TEXT = _FALLBACK_EMERGENCY_VERDICT_TEXT
 
 
+def _hex_to_rgba(hex_color, alpha=0.55):
+    hex_color = (hex_color or "#71828C").lstrip("#")
+    r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
+
+
 def _lookup(mapping, raw_key):
     """Try a raw classification string against a mapping under a few
     common casings (page_helpers.py's real keys might be "Safe",
@@ -94,12 +100,19 @@ def classification_style(classification):
 
     # colors might be a plain hex string instead of a {"color","light"}
     # dict, depending on the real page_helpers.py shape — handle both.
+    # page_helpers.CLASSIFICATION_COLORS is the plain-hex shape in practice,
+    # which used to fall through to one fixed "#EEF2F4" gray for every
+    # classification here — every status badge and day-strip pill rendered
+    # the same neutral background regardless of Safe/Caution/Dangerous,
+    # unlike Tourism's and Fisherman's pills, which already tint per band
+    # via the same f"{color}22" pattern used below. Matching that here
+    # instead of the flat fallback keeps all three pages' pills consistent.
     if isinstance(colors, dict):
         color = colors.get("color") or colors.get("light") or MUTED
-        light = colors.get("light") or colors.get("color") or "#EEF2F4"
+        light = colors.get("light") or (f"{color}22" if color else "#EEF2F4")
     else:
         color = colors or MUTED
-        light = "#EEF2F4"
+        light = f"{color}22" if colors else "#EEF2F4"
 
     return color, light, verdict
 
@@ -213,9 +226,9 @@ def wave_gauge_figure(wave_value, status_color):
                 "bgcolor": "rgba(255,255,255,0.06)",
                 "borderwidth": 0,
                 "steps": [
-                    {"range": [0, WAVE_SAFE_MAX], "color": "rgba(24,166,115,0.55)"},
-                    {"range": [WAVE_SAFE_MAX, WAVE_CAUTION_MAX], "color": "rgba(245,158,11,0.55)"},
-                    {"range": [WAVE_CAUTION_MAX, WAVE_GAUGE_MAX], "color": "rgba(227,77,89,0.55)"},
+                    {"range": [0, WAVE_SAFE_MAX], "color": _hex_to_rgba(classification_style("Safe")[0])},
+                    {"range": [WAVE_SAFE_MAX, WAVE_CAUTION_MAX], "color": _hex_to_rgba(classification_style("Caution")[0])},
+                    {"range": [WAVE_CAUTION_MAX, WAVE_GAUGE_MAX], "color": _hex_to_rgba(classification_style("Dangerous")[0])},
                 ],
             },
         )

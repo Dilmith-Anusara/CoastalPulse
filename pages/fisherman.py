@@ -112,6 +112,12 @@ def _classification_style(classification):
     return color, f"{color}22"
 
 
+def _hex_to_rgba(hex_color, alpha=0.55):
+    hex_color = (hex_color or "#71828C").lstrip("#")
+    r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
+
+
 def _compass(degrees):
     """16-point compass label for a wind/swell/wave direction in degrees,
     since a raw '214°' means little to most readers but 'SW' does.
@@ -129,9 +135,9 @@ def _wave_gauge_figure(wave_value, status_color):
     wave-height gauge, just under different verdict copy.
     """
     steps = [
-        {"range": [0, WAVE_SAFE_MAX], "color": "rgba(24,166,115,0.55)"},
-        {"range": [WAVE_SAFE_MAX, WAVE_CAUTION_MAX], "color": "rgba(245,158,11,0.55)"},
-        {"range": [WAVE_CAUTION_MAX, WAVE_GAUGE_MAX], "color": "rgba(227,77,89,0.55)"},
+        {"range": [0, WAVE_SAFE_MAX], "color": _hex_to_rgba(CLASSIFICATION_COLORS.get("Safe"))},
+        {"range": [WAVE_SAFE_MAX, WAVE_CAUTION_MAX], "color": _hex_to_rgba(CLASSIFICATION_COLORS.get("Caution"))},
+        {"range": [WAVE_CAUTION_MAX, WAVE_GAUGE_MAX], "color": _hex_to_rgba(CLASSIFICATION_COLORS.get("Dangerous"))},
     ]
     return stat_gauge_figure(wave_value, WAVE_GAUGE_MAX, status_color, steps, suffix=" m")
 
@@ -244,9 +250,7 @@ def _conditions_grid(latest_row):
     if swell_dir is not None:
         swell_note = f"{swell_note} · from {_compass(swell_dir)}" if swell_note else f"From {_compass(swell_dir)}"
 
-    wave_note = f"{wave_p:.0f}s period" if wave_p is not None else None
-    if wave_dir is not None:
-        wave_note = f"{wave_note} · from {_compass(wave_dir)}" if wave_note else f"From {_compass(wave_dir)}"
+    wave_note = f"From {_compass(wave_dir)}" if wave_dir is not None else None
 
     cards = [
         metric_card(
@@ -260,10 +264,15 @@ def _conditions_grid(latest_row):
             "m", ACCENT_BLUE, note=swell_note,
         ),
         metric_card(
+            "≈", "Wave period",
+            f"{wave_p:.0f}" if wave_p is not None else "—",
+            "s", ACCENT_GREEN, note=wave_note,
+        ),
+        metric_card(
             "~", "Sea surface temp",
             f"{sst:.1f}" if sst is not None else "—",
             "°C" if sst is not None else "", ACCENT_ORANGE,
-            note=wave_note if sst is not None else "Not measured at this location",
+            note=None if sst is not None else "Not measured at this location",
         ),
     ]
     return html.Div(

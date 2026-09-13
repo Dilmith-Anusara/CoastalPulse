@@ -523,7 +523,12 @@ def update_overview_snapshot(location):
         score = latest.get("suitability_score")
         label, color = score_band(score)
         value_text = f"{score:.0f}/100" if score is not None and pd.notna(score) else "—"
-        rows.append(_snapshot_row("Tourism", location, value_text, score, None, color, label, "/tourism"))
+        # status_text carries the band label (e.g. "Good beach day") so this
+        # row shows a status badge same as Emergency/Fisherman below instead
+        # of leaving that slot blank; meta_text holds a short description
+        # rather than repeating the same label a second time in the row.
+        meta_text = "HCI:Beach suitability score for today's daylight hours."
+        rows.append(_snapshot_row("Tourism", location, value_text, score, label, color, meta_text, "/tourism"))
     else:
         rows.append(_snapshot_row("Tourism", location, "—", None, None, None, "No data yet for this location.", "/tourism"))
 

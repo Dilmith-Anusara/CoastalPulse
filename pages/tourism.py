@@ -59,13 +59,33 @@ SCORE_UNACCEPTABLE_MIN = 20
 HISTORY_MIN_ROWS = 30
 CHART_WINDOW_DAYS = 30
 
+# Colors here match page_helpers.SCORE_BANDS' real per-tier hex values
+# exactly (not the generic ACCENT_* palette) — the gauge steps and the
+# cross-location map below both derive from this same dict, so a location's
+# color can never drift from what its own badge shows. Previously the gauge
+# and map each hardcoded their own ACCENT_*-based palette independently of
+# page_helpers, which silently went out of sync when the scale grew from 3
+# tiers to 5: Impossible rendered pink instead of red, and Good/Excellent
+# swapped colors on the map. Kept in sync manually with page_helpers.py — if
+# you change one, change both.
 _FALLBACK_SCORE_BANDS = [
-    (SCORE_EXCELLENT_MIN, "Excellent beach day", ACCENT_TEAL),
-    (SCORE_GOOD_MIN, "Good beach day", ACCENT_GREEN),
-    (SCORE_MARGINAL_MIN, "Marginal — some conditions worth checking", ACCENT_ORANGE),
+    (SCORE_EXCELLENT_MIN, "Excellent beach day", "#18A673"),
+    (SCORE_GOOD_MIN, "Good beach day", "#2ecc71"),
+    (SCORE_MARGINAL_MIN, "Marginal — some conditions worth checking", "#f39c12"),
     (SCORE_UNACCEPTABLE_MIN, "Unacceptable for most visitors", "#e67e22"),
-    (0, "Impossible — not a viable beach day", ACCENT_PINK),
+    (0, "Impossible — not a viable beach day", "#e74c3c"),
 ]
+
+# Threshold -> real hex color, used by the gauge and map so both always
+# match whatever score_band() actually returns for that tier.
+_SCORE_BAND_HEX = {threshold: color for threshold, _, color in _FALLBACK_SCORE_BANDS}
+
+
+def _hex_to_rgba(hex_color, alpha=0.55):
+    hex_color = hex_color.lstrip("#")
+    r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
+
 
 try:
     from page_helpers import score_band as _page_helpers_score_band
@@ -91,11 +111,11 @@ def score_band(score):
 
 def suitability_gauge_figure(score, band_color):
     steps = [
-        {"range": [0, SCORE_UNACCEPTABLE_MIN], "color": "rgba(176,58,107,0.55)"},
-        {"range": [SCORE_UNACCEPTABLE_MIN, SCORE_MARGINAL_MIN], "color": "rgba(230,126,34,0.55)"},
-        {"range": [SCORE_MARGINAL_MIN, SCORE_GOOD_MIN], "color": "rgba(245,158,11,0.55)"},
-        {"range": [SCORE_GOOD_MIN, SCORE_EXCELLENT_MIN], "color": "rgba(46,204,113,0.55)"},
-        {"range": [SCORE_EXCELLENT_MIN, 100], "color": "rgba(24,166,115,0.55)"},
+        {"range": [0, SCORE_UNACCEPTABLE_MIN], "color": _hex_to_rgba(_SCORE_BAND_HEX[0])},
+        {"range": [SCORE_UNACCEPTABLE_MIN, SCORE_MARGINAL_MIN], "color": _hex_to_rgba(_SCORE_BAND_HEX[SCORE_UNACCEPTABLE_MIN])},
+        {"range": [SCORE_MARGINAL_MIN, SCORE_GOOD_MIN], "color": _hex_to_rgba(_SCORE_BAND_HEX[SCORE_MARGINAL_MIN])},
+        {"range": [SCORE_GOOD_MIN, SCORE_EXCELLENT_MIN], "color": _hex_to_rgba(_SCORE_BAND_HEX[SCORE_GOOD_MIN])},
+        {"range": [SCORE_EXCELLENT_MIN, 100], "color": _hex_to_rgba(_SCORE_BAND_HEX[SCORE_EXCELLENT_MIN])},
     ]
     return stat_gauge_figure(score, 100, band_color, steps, suffix="")
 
@@ -634,11 +654,11 @@ def update_cross_location_views(selected_location):
 
     map_fig = go.Figure()
     bands = [
-        ("Excellent", SCORE_EXCELLENT_MIN, 100, ACCENT_TEAL),
-        ("Good", SCORE_GOOD_MIN, SCORE_EXCELLENT_MIN, ACCENT_GREEN),
-        ("Marginal", SCORE_MARGINAL_MIN, SCORE_GOOD_MIN, ACCENT_ORANGE),
-        ("Unacceptable", SCORE_UNACCEPTABLE_MIN, SCORE_MARGINAL_MIN, "#e67e22"),
-        ("Impossible", 0, SCORE_UNACCEPTABLE_MIN, ACCENT_PINK),
+        ("Excellent", SCORE_EXCELLENT_MIN, 100, _SCORE_BAND_HEX[SCORE_EXCELLENT_MIN]),
+        ("Good", SCORE_GOOD_MIN, SCORE_EXCELLENT_MIN, _SCORE_BAND_HEX[SCORE_GOOD_MIN]),
+        ("Marginal", SCORE_MARGINAL_MIN, SCORE_GOOD_MIN, _SCORE_BAND_HEX[SCORE_MARGINAL_MIN]),
+        ("Unacceptable", SCORE_UNACCEPTABLE_MIN, SCORE_MARGINAL_MIN, _SCORE_BAND_HEX[SCORE_UNACCEPTABLE_MIN]),
+        ("Impossible", 0, SCORE_UNACCEPTABLE_MIN, _SCORE_BAND_HEX[0]),
     ]
     for label, lo, hi, color in bands:
         group = latest[(latest["suitability_score"] >= lo) & (latest["suitability_score"] < hi + (0.01 if hi == 100 else 0))]
