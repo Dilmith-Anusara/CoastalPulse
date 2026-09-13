@@ -1,13 +1,19 @@
 """
 design_system.py — shared visual tokens and layout components for every
-CoastalPulse dashboard page (Emergency, Tourism, Fisherman, Overview).
+CoastalPulse dashboard page (Emergency, Tourism, Fisherman, Analytics).
 
-This exists because Emergency and Tourism were built with two completely
-different, hand-rolled style systems (different colors, card radii,
-fonts, icon styles). Rather than copy-pasting one page's hex codes into
-the other — which just reproduces the same "duplicated styling logic"
-bug class the project's own handoff already flagged for classification
-colors — both pages import their tokens and card components from here.
+Overview and app.py's masthead were already restyled to the approved
+"chart-paper" direction (navy masthead, cream paper, Fraunces/Public
+Sans/IBM Plex Mono, hairline tide-table rows — see app.py's index_string
+CSS for the canonical :root tokens this file mirrors). This file finishes
+that migration for the other pages, replacing the earlier generic
+SaaS-dashboard look it used to define: white rounded cards with soft
+drop-shadows, a metric tile per stat with an emoji icon sitting in a
+tinted colored square, and a different accent color per card ("rainbow
+per tile"). That combination is one of the most recognizable
+AI-generated-dashboard tells there is — the fix isn't more polish, it's
+removing the decoration: no icon tiles, no per-card rainbow, no shadows,
+mono numerals and hairline rules doing the work a card used to.
 
 NOTE: this is layout/visual styling only. Business logic like
 classification bands or suitability-score bands belongs in
@@ -19,32 +25,40 @@ import plotly.graph_objects as go
 import pandas as pd
 
 # ------------------------------------------------------------
-# Core tokens — shared by every page
+# Core tokens — mirrors app.py's CSS :root exactly (--navy, --paper,
+# --paper-line, --teal, --slate, --ink) so Python-rendered styles (Dash
+# callback outputs can't reference CSS custom properties directly) and
+# CSS-rendered ones never drift apart.
 # ------------------------------------------------------------
 
-BG = "#F4F7F9"
+BG = "#F7F1E4"       # --paper
 CARD = "#FFFFFF"
-TEXT = "#102A36"
-MUTED = "#71828C"
-BORDER = "#E4EBEF"
+TEXT = "#16262C"     # --ink
+MUTED = "#3A5A63"    # --slate
+BORDER = "#E4DAC4"   # --paper-line
 
-NAVY = "#0B202A"
-NAVY_2 = "#123746"
+NAVY = "#0C2B3A"      # --navy
+NAVY_2 = "#123B4C"    # a touch lighter — only for things that need subtle depth against navy; no gradients
+TEAL = "#1E7F82"      # --teal
+CORAL = "#D9622A"     # --coral — reserved for actual hazards/alerts, never decoration
 
-LIVE_COLOR = "#18A673"
+LIVE_COLOR = "#4FAE7C"
 LIVE_BG = "#E8F7F1"
 
-PAGE_FONT = "Inter, Arial, sans-serif"
+PAGE_FONT = "Public Sans, Arial, sans-serif"
+MONO_FONT = "IBM Plex Mono, monospace"
 
-# Generic accent palette for chart lines / icon tiles, decoupled from any
-# one page's domain meaning (Emergency's wave/wind/gust/pressure and
-# Tourism's condition chips both just pick colors from here).
-ACCENT_BLUE = "#2878C8"
-ACCENT_PURPLE = "#7757D6"
-ACCENT_PINK = "#B03A6B"
-ACCENT_ORANGE = "#F59E0B"
-ACCENT_TEAL = "#1E8A8A"
-ACCENT_GREEN = "#18A673"
+# Muted "chart pen" colors for distinguishing MULTIPLE DATA SERIES within
+# one chart (e.g. wave vs. wind vs. gust vs. pressure on the same plot) —
+# a legitimate, non-decorative use of color. This is a different thing
+# from tinting a whole metric card by accent, which this file no longer
+# does anywhere.
+ACCENT_BLUE = "#3B6E8C"
+ACCENT_TEAL = TEAL
+ACCENT_ORANGE = "#C08A3E"
+ACCENT_PINK = "#8C4A42"
+ACCENT_PURPLE = "#5B6B8C"
+ACCENT_GREEN = LIVE_COLOR
 
 # CSS class names used by app.py's global "Show details" mechanism —
 # defined once here so every page wraps its content in the same classes.
@@ -59,24 +73,27 @@ PAGE_STYLE = {
     "boxSizing": "border-box",
 }
 
+# Flat navy plate for an always-visible verdict — no gradient, no shadow,
+# a restrained 4px radius (this is a plate sitting mid-page, not an
+# edge-to-edge masthead like Overview's .cp-hero).
 HERO_STYLE = {
     "display": "flex",
     "justifyContent": "space-between",
     "alignItems": "center",
     "gap": "40px",
-    "background": f"linear-gradient(135deg, {NAVY}, {NAVY_2})",
-    "borderRadius": "18px",
+    "backgroundColor": NAVY,
+    "borderRadius": "4px",
     "padding": "36px 40px",
     "marginBottom": "24px",
-    "boxShadow": "0 8px 24px rgba(11,32,42,0.12)",
 }
 
+# Matches Overview's .cp-card exactly: hairline border, small radius, no
+# shadow — a chart is a bordered plate, not a floating card.
 CARD_STYLE = {
     "backgroundColor": CARD,
     "border": f"1px solid {BORDER}",
-    "borderRadius": "16px",
+    "borderRadius": "8px",
     "padding": "28px",
-    "boxShadow": "0 2px 8px rgba(15, 45, 58, 0.035)",
 }
 
 
@@ -85,36 +102,93 @@ CARD_STYLE = {
 # ------------------------------------------------------------
 
 def section_title(title, subtitle=None):
+    # Real <h3> (not a styled div) so it picks up app.py's global
+    # `h1,h2,h3 { font-family: Fraunces }` rule for free — one less place
+    # a heading style can drift from the rest of the app.
     children = [
-        html.Div(
+        html.H3(
             title,
-            style={"fontSize": "17px", "fontWeight": "700", "color": TEXT, "marginBottom": "7px"},
+            style={"fontSize": "18px", "fontWeight": "500", "color": NAVY, "margin": "0 0 7px 0"},
         )
     ]
     if subtitle:
         children.append(
             html.Div(
                 subtitle,
-                style={"fontSize": "12px", "color": MUTED, "lineHeight": "1.6", "marginBottom": "22px"},
+                style={"fontSize": "12.5px", "color": MUTED, "lineHeight": "1.6", "marginBottom": "22px"},
             )
         )
     return html.Div(children)
 
 
-def metric_card(icon, label, value, unit="", accent=ACCENT_BLUE, note=None):
-    """A single stat tile. `value` can be either:
-      - a plain string/number to render immediately (e.g. Tourism's
-        plain-language condition chips), or
-      - a Dash component such as html.Span(id="some-id") whose children a
-        callback fills in later (e.g. Emergency's live-updating cards).
+def badge_style(color):
+    """Flat rectangular status badge — matches Overview's .cp-badge CSS
+    class, reimplemented as a style dict for callback-driven Dash outputs
+    (a CSS class alone can't carry a per-status color chosen at runtime).
+    Not a rounded pill — pill badges read as a generic SaaS-notification
+    default; a flat rectangle with a hairline inset ring reads closer to
+    a chart-annotation tag.
+    """
+    return {
+        "display": "inline-block",
+        "backgroundColor": color,
+        "color": "white",
+        "padding": "3px 9px",
+        "borderRadius": "2px",
+        "fontSize": "11px",
+        "fontWeight": "700",
+        "textShadow": "0 1px 1px rgba(0,0,0,0.25)",
+        "boxShadow": "inset 0 0 0 1px rgba(0,0,0,0.08)",
+    }
 
-    `note`, if given, is a short muted caption under the value (e.g. a
-    plain-language band like "Choppy" alongside a raw "1.2 m" reading).
+
+def note_box(children, tone="default"):
+    """A citation/disclaimer/insight callout. Deliberately just a hairline
+    left rule over the page background, not a tinted rounded 'alert box'
+    — that colored-background note card (soft yellow/teal fill, rounded
+    corners) is one of the more recognizable AI-generated-dashboard
+    tells, and Overview's own highlight banner never used it. `tone`
+    picks the rule color only; the box never gets a background fill.
+    """
+    rule_color = {"default": BORDER, "alert": CORAL, "info": TEAL}.get(tone, BORDER)
+    return html.Div(
+        children,
+        style={
+            "borderLeft": f"3px solid {rule_color}",
+            "paddingLeft": "16px",
+            "fontSize": "13px",
+            "color": TEXT,
+            "lineHeight": "1.6",
+        },
+    )
+
+
+def metric_card(icon, label, value, unit="", accent=ACCENT_TEAL, note=None):
+    """A single reading, styled like a chart-annotation cell: a small-caps
+    mono-ish label, a large IBM Plex Mono numeral, a hairline top rule.
+    No card box, no shadow, no icon.
+
+    `icon` is accepted for backward compatibility with existing call
+    sites (Emergency/Tourism pass an emoji here) but deliberately never
+    rendered — an emoji sitting in a tinted rounded square was the
+    single biggest tell that this dashboard's look came from a
+    generative-UI default rather than a considered design.
+
+    `accent` now only tints a 2px left rule instead of an icon tile's
+    background, so color stays a quiet signal rather than decoration —
+    call sites can still pass a different accent per reading without it
+    reading as an arbitrary rainbow.
+
+    `value` can be either a plain string/number to render immediately, or
+    a Dash component (e.g. html.Span(id=...)) a callback fills in later.
     """
     if isinstance(value, (str, int, float)):
         value_node = html.Span(
             str(value),
-            style={"fontSize": "22px", "fontWeight": "750", "color": TEXT, "letterSpacing": "-0.4px"},
+            style={
+                "fontFamily": MONO_FONT, "fontSize": "21px", "fontWeight": "500",
+                "color": NAVY, "letterSpacing": "-0.02em",
+            },
         )
     else:
         value_node = value
@@ -122,45 +196,25 @@ def metric_card(icon, label, value, unit="", accent=ACCENT_BLUE, note=None):
     return html.Div(
         [
             html.Div(
-                [
-                    html.Div(
-                        icon,
-                        style={
-                            "width": "38px",
-                            "height": "38px",
-                            "borderRadius": "10px",
-                            "display": "flex",
-                            "alignItems": "center",
-                            "justifyContent": "center",
-                            "backgroundColor": f"{accent}15",
-                            "color": accent,
-                            "fontSize": "17px",
-                            "fontWeight": "700",
-                        },
-                    ),
-                    html.Div(
-                        label,
-                        style={"fontSize": "12px", "fontWeight": "600", "color": MUTED, "marginLeft": "10px"},
-                    ),
-                ],
-                style={"display": "flex", "alignItems": "center", "marginBottom": "18px"},
+                label,
+                style={
+                    "fontSize": "10.5px", "fontWeight": "600", "letterSpacing": "0.5px",
+                    "textTransform": "uppercase", "color": MUTED, "marginBottom": "10px",
+                },
             ),
             html.Div(
                 [
                     value_node,
-                    html.Span(unit, style={"fontSize": "12px", "fontWeight": "600", "color": MUTED, "marginLeft": "6px"})
-                    if unit
-                    else None,
+                    html.Span(unit, style={"fontSize": "11px", "color": MUTED, "marginLeft": "5px"}) if unit else None,
                 ]
             ),
-            html.Div(note, style={"fontSize": "11px", "color": MUTED, "marginTop": "8px"}) if note else None,
+            html.Div(note, style={"fontSize": "11px", "color": MUTED, "marginTop": "7px"}) if note else None,
         ],
         style={
+            "padding": "16px 18px",
+            "borderLeft": f"2px solid {accent}",
+            "borderTop": f"1px solid {BORDER}",
             "backgroundColor": CARD,
-            "border": f"1px solid {BORDER}",
-            "borderRadius": "15px",
-            "padding": "24px",
-            "boxShadow": "0 2px 8px rgba(15, 45, 58, 0.035)",
         },
     )
 
@@ -180,44 +234,28 @@ def chart_card(title, subtitle, graph_id, height=400):
 
 
 def day_pill(day_label, date_label, dot_color, bg_color, badge_text):
-    """One tile in a 7-day strip — used by both Emergency (classification
-    label) and Tourism (score-band label) so the strips look identical.
+    """One column in a 7-day strip — a log-entry column (day, date, flat
+    status badge) with a hairline left rule, not a bordered mini-card.
+    `bg_color` is accepted for backward compatibility with existing call
+    sites but no longer used as a background fill.
     """
     return html.Div(
         [
-            html.Div(day_label, style={"fontSize": "11px", "fontWeight": "700", "color": TEXT, "marginBottom": "5px"}),
-            html.Div(date_label, style={"fontSize": "10px", "color": MUTED, "marginBottom": "14px"}),
-            html.Div(
-                [
-                    html.Div(
-                        style={
-                            "width": "7px",
-                            "height": "7px",
-                            "borderRadius": "50%",
-                            "backgroundColor": dot_color,
-                            "marginRight": "6px",
-                        }
-                    ),
-                    html.Span(badge_text, style={"fontSize": "10px", "fontWeight": "700", "color": dot_color}),
-                ],
-                style={
-                    "display": "flex",
-                    "alignItems": "center",
-                    "padding": "6px 9px",
-                    "borderRadius": "8px",
-                    "backgroundColor": bg_color,
-                    "width": "fit-content",
-                },
-            ),
+            html.Div(day_label, style={"fontSize": "10.5px", "fontWeight": "700", "letterSpacing": "0.3px", "textTransform": "uppercase", "color": TEXT, "marginBottom": "5px"}),
+            html.Div(date_label, style={"fontFamily": MONO_FONT, "fontSize": "10.5px", "color": MUTED, "marginBottom": "14px"}),
+            html.Span(badge_text, style=badge_style(dot_color)),
         ],
-        style={"padding": "16px", "border": f"1px solid {BORDER}", "borderRadius": "11px", "backgroundColor": "#FBFCFD"},
+        style={"padding": "14px 14px 14px 12px", "borderLeft": f"1px solid {BORDER}"},
     )
 
 
 def day_strip_grid(pills):
     return html.Div(
         pills,
-        style={"display": "grid", "gridTemplateColumns": "repeat(7, minmax(0, 1fr))", "gap": "14px"},
+        style={
+            "display": "grid", "gridTemplateColumns": "repeat(7, minmax(0, 1fr))",
+            "borderTop": f"1px solid {NAVY}",
+        },
     )
 
 
@@ -225,7 +263,7 @@ def empty_chart(message="No data available"):
     fig = go.Figure()
     fig.add_annotation(
         text=message, x=0.5, y=0.5, xref="paper", yref="paper", showarrow=False,
-        font=dict(size=14, color=MUTED),
+        font=dict(size=14, color=MUTED, family=PAGE_FONT),
     )
     fig.update_layout(
         paper_bgcolor=CARD, plot_bgcolor=CARD,
@@ -240,7 +278,7 @@ def empty_map():
     fig.update_layout(
         map=dict(style="open-street-map", center=dict(lat=7.5, lon=80.7), zoom=6),
         margin=dict(l=0, r=0, t=0, b=0),
-        paper_bgcolor=CARD,
+        paper_bgcolor=BG,
     )
     return fig
 
@@ -259,12 +297,12 @@ def stat_gauge_figure(value, value_max, bar_color, steps, suffix="", height=190)
         go.Indicator(
             mode="gauge+number",
             value=float(value) if pd.notna(value) else 0,
-            number={"suffix": suffix, "font": {"size": 26, "color": "white"}},
+            number={"suffix": suffix, "font": {"size": 26, "color": "white", "family": MONO_FONT}},
             gauge={
                 "axis": {
                     "range": [0, value_max],
-                    "tickcolor": "#8EA6B0",
-                    "tickfont": {"color": "#8EA6B0", "size": 10},
+                    "tickcolor": "#7C97A0",
+                    "tickfont": {"color": "#7C97A0", "size": 10},
                 },
                 "bar": {"color": bar_color, "thickness": 0.42},
                 "bgcolor": "rgba(255,255,255,0.06)",
@@ -277,6 +315,6 @@ def stat_gauge_figure(value, value_max, bar_color, steps, suffix="", height=190)
         paper_bgcolor="rgba(0,0,0,0)",
         margin=dict(l=16, r=16, t=16, b=8),
         height=height,
-        font=dict(color="white"),
+        font=dict(color="white", family=PAGE_FONT),
     )
     return fig

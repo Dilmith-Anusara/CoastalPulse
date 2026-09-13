@@ -11,10 +11,11 @@ from data_access import (
     get_emergency_data,
 )
 from design_system import (
-    BG, CARD, TEXT, MUTED, BORDER, NAVY, NAVY_2, LIVE_COLOR, LIVE_BG,
+    CARD, TEXT, MUTED, BORDER, NAVY,
     ACCENT_BLUE, ACCENT_PURPLE, ACCENT_PINK, ACCENT_ORANGE, ACCENT_TEAL,
     PAGE_STYLE, HERO_STYLE, CARD_STYLE, VERDICT_ZONE_CLASS, DETAIL_ZONE_CLASS,
     section_title, metric_card, chart_card, day_pill, day_strip_grid, empty_chart,
+    badge_style,
 )
 
 # Emergency-specific chart-line accent aliases (kept as separate names for
@@ -250,81 +251,14 @@ def map_hover_text(location_name, classification, wave):
 
 layout = html.Div(
     [
-        # ----------------------------------------------------
-        # TOP HEADER
-        # ----------------------------------------------------
-        html.Div(
-            [
-                html.Div(
-                    [
-                        html.Div(
-                            "EMERGENCY MONITORING",
-                            style={
-                                "fontSize": "11px",
-                                "fontWeight": "700",
-                                "letterSpacing": "1.4px",
-                                "color": "#6E8590",
-                                "marginBottom": "6px",
-                            },
-                        ),
-                        html.H1(
-                            "Coastal Risk Monitor",
-                            style={
-                                "margin": "0",
-                                "fontSize": "30px",
-                                "fontWeight": "750",
-                                "letterSpacing": "-0.7px",
-                                "color": TEXT,
-                            },
-                        ),
-                        html.Div(
-                            "See if it's safe to go near the sea today.",
-                            style={
-                                "fontSize": "13px",
-                                "color": MUTED,
-                                "marginTop": "7px",
-                            },
-                        ),
-                    ]
-                ),
-                html.Div(
-                    [
-                        html.Div(
-                            style={
-                                "width": "7px",
-                                "height": "7px",
-                                "borderRadius": "50%",
-                                "backgroundColor": LIVE_COLOR,
-                                "marginRight": "7px",
-                            }
-                        ),
-                        html.Span(
-                            "LIVE DATA",
-                            style={
-                                "fontSize": "10px",
-                                "fontWeight": "750",
-                                "letterSpacing": "0.8px",
-                                "color": LIVE_COLOR,
-                            },
-                        ),
-                    ],
-                    style={
-                        "display": "flex",
-                        "alignItems": "center",
-                        "padding": "9px 12px",
-                        "backgroundColor": LIVE_BG,
-                        "borderRadius": "20px",
-                    },
-                ),
-            ],
-            style={
-                "display": "flex",
-                "justifyContent": "space-between",
-                "alignItems": "center",
-                "marginBottom": "34px",
-                "gap": "24px",
-            },
-        ),
+        # Page kicker/title/description come from app.py's shared page-intro
+        # (the header already reads "Emergency monitoring / Coastal risk" for
+        # this route) and real data freshness from the header's freshness
+        # badge — this page used to duplicate both with its own hardcoded
+        # header and a decorative "LIVE DATA" pill, which is what caused it
+        # to also hardcode "Inter" as its font (reintroducing the exact
+        # generic-font problem already fixed app-wide). Removed rather than
+        # restyled.
 
         # ----------------------------------------------------
         # VERDICT ZONE — always visible. Plain language + gauge +
@@ -423,17 +357,7 @@ layout = html.Div(
                             style={"minWidth": "240px"},
                         ),
                     ],
-                    style={
-                        "display": "flex",
-                        "justifyContent": "space-between",
-                        "alignItems": "center",
-                        "gap": "40px",
-                        "background": f"linear-gradient(135deg, {NAVY}, {NAVY_2})",
-                        "borderRadius": "18px",
-                        "padding": "36px 40px",
-                        "marginBottom": "24px",
-                        "boxShadow": "0 8px 24px rgba(11,32,42,0.12)",
-                    },
+                    style=HERO_STYLE,
                 ),
 
                 # --- 7-day plain-language strip ---
@@ -443,22 +367,9 @@ layout = html.Div(
                             "Last 7 days",
                             "How conditions looked recently at this location.",
                         ),
-                        html.Div(
-                            id="emergency-day-strip",
-                            style={
-                                "display": "grid",
-                                "gridTemplateColumns": "repeat(7, minmax(0, 1fr))",
-                                "gap": "14px",
-                            },
-                        ),
+                        html.Div(id="emergency-day-strip"),
                     ],
-                    style={
-                        "backgroundColor": CARD,
-                        "border": f"1px solid {BORDER}",
-                        "borderRadius": "16px",
-                        "padding": "28px",
-                        "boxShadow": "0 2px 8px rgba(15, 45, 58, 0.035)",
-                    },
+                    style=CARD_STYLE,
                 ),
             ],
             className="cp-verdict-zone",
@@ -484,13 +395,14 @@ layout = html.Div(
                         metric_card("↯", "Maximum wind gust", html.Span(id="emergency-gust-value"), "km/h", GUST_LINE),
                         metric_card("P", "Minimum pressure", html.Span(id="emergency-pressure-value"), "hPa", PRESSURE_LINE),
                         metric_card("≋", "Sea level (vs. mean)", html.Span(id="emergency-sea-level-value"), "m", ACCENT_TEAL),
-                        metric_card("◉", "Days recorded", html.Span(id="emergency-observation-value"), "", LIVE_COLOR),
+                        metric_card("◉", "Days recorded", html.Span(id="emergency-observation-value"), "", ACCENT_TEAL),
                     ],
                     style={
                         "display": "grid",
                         "gridTemplateColumns": "repeat(auto-fit, minmax(180px, 1fr))",
-                        "gap": "18px",
                         "marginBottom": "24px",
+                        "border": f"1px solid {BORDER}",
+                        "borderRight": "none",
                     },
                 ),
 
@@ -524,13 +436,7 @@ layout = html.Div(
                             style={"height": "560px"},
                         ),
                     ],
-                    style={
-                        "backgroundColor": CARD,
-                        "border": f"1px solid {BORDER}",
-                        "borderRadius": "16px",
-                        "padding": "28px",
-                        "boxShadow": "0 2px 8px rgba(15, 45, 58, 0.035)",
-                    },
+                    style=CARD_STYLE,
                 ),
             ],
             className="cp-detail-zone",
@@ -538,13 +444,7 @@ layout = html.Div(
 
         html.Div(style={"height": "36px"}),
     ],
-    style={
-        "backgroundColor": BG,
-        "minHeight": "100vh",
-        "padding": "36px 44px",
-        "fontFamily": "Inter, Arial, sans-serif",
-        "boxSizing": "border-box",
-    },
+    style=PAGE_STYLE,
 )
 
 
@@ -580,14 +480,7 @@ def update_emergency_page(location):
     if not location:
         return (
             "NO DATA",
-            {
-                "backgroundColor": "#EEF2F4",
-                "color": MUTED,
-                "padding": "7px 12px",
-                "borderRadius": "20px",
-                "fontSize": "11px",
-                "fontWeight": "700",
-            },
+            badge_style(MUTED),
             "Choose a location",
             "Pick a location above to see coastal conditions.",
             "",
@@ -610,17 +503,10 @@ def update_emergency_page(location):
     try:
         df = get_emergency_data(location)
     except Exception:
-        color, light, _ = classification_style("unknown")
+        color, _, _ = classification_style("unknown")
         return (
             "ERROR",
-            {
-                "backgroundColor": light,
-                "color": color,
-                "padding": "7px 12px",
-                "borderRadius": "20px",
-                "fontSize": "11px",
-                "fontWeight": "700",
-            },
+            badge_style(color),
             location or "Unknown location",
             "We couldn't load data for this location right now.",
             "",
@@ -641,17 +527,10 @@ def update_emergency_page(location):
     # Validate data
     # --------------------------------------------------------
     if df is None or df.empty:
-        color, light, verdict = classification_style("unknown")
+        color, _, verdict = classification_style("unknown")
         return (
             "NO DATA",
-            {
-                "backgroundColor": light,
-                "color": color,
-                "padding": "7px 12px",
-                "borderRadius": "20px",
-                "fontSize": "11px",
-                "fontWeight": "700",
-            },
+            badge_style(color),
             location or "Unknown location",
             verdict,
             "",
@@ -711,16 +590,7 @@ def update_emergency_page(location):
         style={"fontSize": "10px", "fontWeight": "800", "letterSpacing": "0.6px"},
     )
 
-    badge_style = {
-        "backgroundColor": status_light,
-        "color": status_color,
-        "padding": "7px 12px",
-        "borderRadius": "20px",
-        "fontSize": "11px",
-        "fontWeight": "700",
-        "display": "inline-flex",
-        "alignItems": "center",
-    }
+    status_badge_style = badge_style(status_color)
 
     gauge_fig = wave_gauge_figure(wave, status_color)
 
@@ -787,12 +657,12 @@ def update_emergency_page(location):
             paper_bgcolor=CARD,
             plot_bgcolor=CARD,
             margin=dict(l=45, r=20, t=10, b=45),
-            font=dict(family="Inter, Arial", color=TEXT, size=11),
+            font=dict(family="Public Sans, Arial", color=TEXT, size=11),
             xaxis=dict(showgrid=False, zeroline=False, showline=True, linecolor=BORDER, tickfont=dict(color=MUTED)),
             yaxis=dict(
                 title="Wave height (m)",
                 showgrid=True,
-                gridcolor="#EDF1F3",
+                gridcolor="#EDE6D3",
                 zeroline=False,
                 title_font=dict(size=11, color=MUTED),
                 tickfont=dict(color=MUTED),
@@ -847,12 +717,12 @@ def update_emergency_page(location):
             paper_bgcolor=CARD,
             plot_bgcolor=CARD,
             margin=dict(l=50, r=65, t=15, b=50),
-            font=dict(family="Inter, Arial", color=TEXT, size=11),
+            font=dict(family="Public Sans, Arial", color=TEXT, size=11),
             xaxis=dict(showgrid=False, zeroline=False, showline=True, linecolor=BORDER, tickfont=dict(color=MUTED)),
             yaxis=dict(
                 title="Wind speed (km/h)",
                 showgrid=True,
-                gridcolor="#EDF1F3",
+                gridcolor="#EDE6D3",
                 zeroline=False,
                 title_font=dict(size=11, color=WIND_LINE),
                 tickfont=dict(color=MUTED),
@@ -877,7 +747,7 @@ def update_emergency_page(location):
     # ========================================================
     return (
         badge,
-        badge_style,
+        status_badge_style,
         location or "Unknown location",
         verdict,
         history_note,
@@ -889,7 +759,7 @@ def update_emergency_page(location):
         pressure_value,
         sea_level_value,
         str(observation_count),
-        day_cards,
+        day_strip_grid(day_cards),
         wave_fig,
         wind_pressure_fig,
     )

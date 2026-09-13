@@ -25,11 +25,11 @@ import pandas as pd
 
 from data_access import get_tourism_data, get_tourism_extras
 from design_system import (
-    CARD, TEXT, MUTED, BORDER, NAVY, NAVY_2,
+    CARD, TEXT, MUTED, BORDER, NAVY,
     ACCENT_BLUE, ACCENT_ORANGE, ACCENT_TEAL, ACCENT_PINK, ACCENT_PURPLE, ACCENT_GREEN,
     PAGE_STYLE, HERO_STYLE, CARD_STYLE, VERDICT_ZONE_CLASS, DETAIL_ZONE_CLASS,
     section_title, metric_card, chart_card, day_pill, day_strip_grid,
-    empty_chart, empty_map, stat_gauge_figure,
+    empty_chart, empty_map, stat_gauge_figure, badge_style, note_box,
 )
 
 try:
@@ -219,15 +219,14 @@ layout = html.Div(
         html.Div(
             [
                 html.Div(
-                    "Suitability score is HCI:Beach, a published tourism-climate "
-                    "index (Gunathilake et al. 2023) adapted for Sri Lankan "
-                    "beaches — a research approximation of comfort, not an "
-                    "authoritative guarantee.",
-                    style={
-                        "backgroundColor": "#fff8e1", "padding": "12px 16px",
-                        "borderLeft": f"4px solid {ACCENT_ORANGE}", "borderRadius": "6px",
-                        "marginBottom": "24px", "fontSize": "12px", "color": TEXT,
-                    },
+                    note_box(
+                        "Suitability score is HCI:Beach, a published tourism-climate "
+                        "index (Gunathilake et al. 2023) adapted for Sri Lankan "
+                        "beaches — a research approximation of comfort, not an "
+                        "authoritative guarantee.",
+                        tone="alert",
+                    ),
+                    style={"marginBottom": "24px"},
                 ),
 
                 html.Div(
@@ -236,7 +235,8 @@ layout = html.Div(
                     style={
                         "display": "grid",
                         "gridTemplateColumns": "repeat(auto-fit, minmax(180px, 1fr))",
-                        "gap": "18px", "marginBottom": "24px",
+                        "marginBottom": "24px",
+                        "border": f"1px solid {BORDER}", "borderRight": "none",
                     },
                 ),
 
@@ -250,7 +250,8 @@ layout = html.Div(
                     style={
                         "display": "grid",
                         "gridTemplateColumns": "repeat(auto-fit, minmax(180px, 1fr))",
-                        "gap": "18px", "marginBottom": "24px",
+                        "marginBottom": "24px",
+                        "border": f"1px solid {BORDER}", "borderRight": "none",
                     },
                 ),
 
@@ -361,13 +362,7 @@ def update_tourism_page(location):
                     html.Div(
                         [
                             html.Div(location, style={"fontSize": "24px", "fontWeight": "750", "color": "white"}),
-                            html.Span(
-                                score_text,
-                                style={
-                                    "marginLeft": "14px", "backgroundColor": band_color, "color": "white",
-                                    "padding": "7px 12px", "borderRadius": "20px", "fontSize": "11px", "fontWeight": "800",
-                                },
-                            ),
+                            html.Span(score_text, style={**badge_style(band_color), "marginLeft": "14px"}),
                         ],
                         style={"display": "flex", "alignItems": "center", "flexWrap": "wrap", "rowGap": "10px"},
                     ),
@@ -492,9 +487,9 @@ def update_tourism_page(location):
                                            line=dict(color=ACCENT_PURPLE, width=3), marker=dict(size=6, color=ACCENT_PURPLE), mode="lines+markers"))
     sea_wind_fig.update_layout(
         paper_bgcolor=CARD, plot_bgcolor=CARD, margin=dict(l=50, r=60, t=15, b=45),
-        font=dict(family="Inter, Arial", color=TEXT, size=11),
+        font=dict(family="Public Sans, Arial", color=TEXT, size=11),
         xaxis=dict(showgrid=False, zeroline=False, showline=True, linecolor=BORDER, tickfont=dict(color=MUTED)),
-        yaxis=dict(title="Wave height (m)", showgrid=True, gridcolor="#EDF1F3", title_font=dict(size=11, color=ACCENT_BLUE), tickfont=dict(color=MUTED)),
+        yaxis=dict(title="Wave height (m)", showgrid=True, gridcolor="#EDE6D3", title_font=dict(size=11, color=ACCENT_BLUE), tickfont=dict(color=MUTED)),
         yaxis2=dict(title="Wind speed (km/h)", overlaying="y", side="right", showgrid=False, title_font=dict(size=11, color=ACCENT_PURPLE), tickfont=dict(color=MUTED)),
         legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="right", x=1, font=dict(size=11, color=MUTED)),
         hoverlabel=dict(bgcolor=NAVY, font_color="white"),
@@ -509,9 +504,9 @@ def update_tourism_page(location):
                                        marker_color=ACCENT_TEAL, opacity=0.45))
     sun_rain_fig.update_layout(
         paper_bgcolor=CARD, plot_bgcolor=CARD, margin=dict(l=50, r=60, t=15, b=45),
-        font=dict(family="Inter, Arial", color=TEXT, size=11),
+        font=dict(family="Public Sans, Arial", color=TEXT, size=11),
         xaxis=dict(showgrid=False, zeroline=False, showline=True, linecolor=BORDER, tickfont=dict(color=MUTED)),
-        yaxis=dict(title="UV index", showgrid=True, gridcolor="#EDF1F3", title_font=dict(size=11, color=ACCENT_ORANGE), tickfont=dict(color=MUTED)),
+        yaxis=dict(title="UV index", showgrid=True, gridcolor="#EDE6D3", title_font=dict(size=11, color=ACCENT_ORANGE), tickfont=dict(color=MUTED)),
         yaxis2=dict(title="Precipitation (mm)", overlaying="y", side="right", showgrid=False, title_font=dict(size=11, color=ACCENT_TEAL), tickfont=dict(color=MUTED)),
         legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="right", x=1, font=dict(size=11, color=MUTED)),
         hoverlabel=dict(bgcolor=NAVY, font_color="white"),
@@ -525,9 +520,9 @@ def update_tourism_page(location):
                                       mode="lines+markers", fill="tozeroy", fillcolor="rgba(176,58,107,0.08)"))
         sst_fig.update_layout(
             paper_bgcolor=CARD, plot_bgcolor=CARD, margin=dict(l=50, r=20, t=15, b=45),
-            font=dict(family="Inter, Arial", color=TEXT, size=11),
+            font=dict(family="Public Sans, Arial", color=TEXT, size=11),
             xaxis=dict(showgrid=False, zeroline=False, showline=True, linecolor=BORDER, tickfont=dict(color=MUTED)),
-            yaxis=dict(title="Sea temp (°C)", showgrid=True, gridcolor="#EDF1F3", title_font=dict(size=11, color=MUTED), tickfont=dict(color=MUTED)),
+            yaxis=dict(title="Sea temp (°C)", showgrid=True, gridcolor="#EDE6D3", title_font=dict(size=11, color=MUTED), tickfont=dict(color=MUTED)),
             hoverlabel=dict(bgcolor=NAVY, font_color="white"),
         )
     else:
@@ -569,14 +564,7 @@ def _best_pick_note(latest, selected_location):
     else:
         text = f"Today's best pick across all 15 locations is {top_name} (score {top_score:.0f}/100)."
 
-    return html.Div(
-        text,
-        style={
-            "backgroundColor": "#EAF7F5", "padding": "12px 16px",
-            "borderLeft": f"4px solid {ACCENT_TEAL}", "borderRadius": "6px",
-            "fontSize": "13px", "color": TEXT, "lineHeight": "1.6",
-        },
-    )
+    return note_box(text, tone="info")
 
 
 @callback(
@@ -618,8 +606,8 @@ def update_cross_location_views(selected_location):
     bar_fig.update_traces(marker_color=bar_colors)
     bar_fig.update_layout(
         paper_bgcolor=CARD, plot_bgcolor=CARD, margin=dict(l=45, r=20, t=10, b=60),
-        font=dict(family="Inter, Arial", color=TEXT, size=11),
-        yaxis=dict(title="Score (0-100)", range=[0, 100], gridcolor="#EDF1F3"),
+        font=dict(family="Public Sans, Arial", color=TEXT, size=11),
+        yaxis=dict(title="Score (0-100)", range=[0, 100], gridcolor="#EDE6D3"),
         xaxis=dict(title=None, tickangle=-35),
     )
 

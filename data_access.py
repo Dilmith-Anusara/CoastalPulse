@@ -84,6 +84,17 @@ else:
     )
     LOCATION_COORDS = {loc["name"]: (loc["lat"], loc["lon"]) for loc in _FALLBACK_LOCATIONS}
 
+# Sri Lanka's two coastal monsoon regimes run opposite each other: the
+# Southwest monsoon (roughly May-Sep) brings rain/rough seas to the west
+# and south coasts while the Northeast monsoon (roughly Dec-Feb) does the
+# same to the east coast and the north — a well-documented Dept. of
+# Meteorology climatology, and the reason Sri Lanka's surf/tourism
+# industry runs two opposite "seasons" on opposite coasts. Used by the
+# Analytics page to split pooled monthly trends by region instead of
+# averaging two opposite seasonal signals into one flat line.
+NORTHEAST_COAST = {"Trincomalee", "Batticaloa", "Arugam Bay", "Jaffna"}
+COAST_REGION = {name: ("Northeast coast" if name in NORTHEAST_COAST else "Southwest coast") for name in LOCATIONS}
+
 load_dotenv()
 
 _SUPABASE_URL = os.environ.get("SUPABASE_URL")
@@ -253,6 +264,7 @@ def get_analytics_data() -> pd.DataFrame:
         return pd.DataFrame()
     merged = pd.merge(em, tm, on=["location_name", "date"], how="outer", suffixes=("_em", "_tm"))
     merged["month"] = merged["date"].dt.to_period("M").astype(str)
+    merged["coast_region"] = merged["location_name"].map(COAST_REGION)
     return merged
 
 
