@@ -9,3 +9,9 @@ nbclient==0.11.0
 ipykernel==7.3.0
 matplotlib==3.11.2
 seaborn==0.13.2
+
+# pipeline/build_forecasts.py's SARIMA model — pipeline-only, same reasoning
+# as the notebook deps above (keeps Vercel's deployed app lean; the dashboard
+# only ever reads the `forecasts` table this script writes, never fits a
+# model itself).
+statsmodels==0.15.0

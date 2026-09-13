@@ -355,25 +355,28 @@ def get_fisherman_silver(location: str, days_back: int = 30) -> pd.DataFrame:
 @cache_stub
 def get_fisherman_forecast(location: str) -> pd.DataFrame:
     """
-    Placeholder for the Forecasts table (not yet built — blocked on SARIMA,
-    Phase 4). Returns mocked 48h dummy data shaped like the eventual real
-    query so the Fisherman dashboard page can be built and demoed now, per
-    the handoff's parallel-track recommendation. SWAP THIS OUT for a real
-    `.table("forecasts").select("*")...` query once the table exists —
-    do not let this mock silently linger past that point.
+    Pulls the 48-hour-ahead wave_height forecast from the `forecasts` table,
+    written by pipeline/build_forecasts.py (a per-location SARIMA model
+    fit directly on silver_hourly — see that script's docstring for the
+    model order, validation, and why it isn't fit inside this app). Each
+    row also carries `backtest_rmse` — the model's real held-out accuracy
+    for this location the last time the pipeline ran — so the UI can show
+    an honest error margin instead of implying the forecast is exact.
+
+    Returns an empty DataFrame (not mock data) if the pipeline hasn't been
+    run yet for this location — the UI is responsible for saying so.
     """
     _validate_location(location)
-    horizon = pd.date_range(
-        start=pd.Timestamp.now("UTC").floor("h"), periods=48, freq="h"
+    resp = (
+        get_client()
+        .table("forecasts")
+        .select("*")
+        .eq("location_name", location)
+        .order("forecast_time")
+        .execute()
     )
-    import numpy as np
-    rng = np.random.default_rng(seed=hash(location) % (2**32))
-    mock_wave = 1.0 + 0.5 * np.sin(np.linspace(0, 4 * np.pi, 48)) + rng.normal(0, 0.1, 48)
-    return pd.DataFrame(
-        {
-            "location_name": location,
-            "forecast_time": horizon,
-            "wave_height_forecast": mock_wave.clip(min=0),
-            "is_mocked": True,  # UI must surface this flag, not hide it
-        }
-    )
+    df = pd.DataFrame(resp.data)
+    if not df.empty:
+        df["forecast_time"] = pd.to_datetime(df["forecast_time"])
+        df["generated_at"] = pd.to_datetime(df["generated_at"])
+    return df
