@@ -636,112 +636,139 @@ dash_app.index_string = """
 
 
         /* ==================================================
-           MODE CARDS — shared grid/card idiom for both the
-           Overview snapshot (one location, 3 modes) and the
-           "which view is for you" picker (Sri-Lanka-wide, 3
-           modes). Replaces a plain table and a plain vertical
-           list with the same component so the page reads as
-           one system rather than two different list styles.
-           Each mode gets its own identity color via a modifier
-           class (.emergency/.tourism/.fisherman) reused by both
-           sections, so the color coding means the same thing
-           everywhere on the page.
+           LEDGER ROWS — shared row idiom for both the Overview
+           snapshot (one location, 3 modes, each with a real
+           number + magnitude bar) and the "which view is for
+           you" picker (Sri-Lanka-wide, 3 modes, description +
+           live stat instead of a bar). Replaced an earlier card-
+           grid version that read as a generic dashboard-template
+           look — this stays in the tide-table/ledger language the
+           rest of the app already uses (hairline rows, mono
+           numerals, no boxes/shadows) instead of introducing a
+           new "card" idiom. Each mode gets its own identity color
+           via a small dot (.emergency/.tourism/.fisherman) reused
+           by both sections, so the color coding means the same
+           thing everywhere on the page.
         ================================================== */
 
-        .cp-mode-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 16px;
+        .cp-ledger {
+            border-top: 1px solid var(--navy);
         }
 
-        .cp-mode-card {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            height: 100%;
-            background: #ffffff;
-            border: 1px solid var(--paper-line);
-            border-top: 3px solid var(--teal);
-            border-radius: 10px;
-            padding: 22px;
-            transition: box-shadow 0.15s ease, transform 0.15s ease;
-        }
-
-        .cp-mode-card.emergency { border-top-color: var(--coral); }
-        .cp-mode-card.tourism { border-top-color: var(--teal); }
-        .cp-mode-card.fisherman { border-top-color: var(--slate); }
-
-        .cp-mode-card-tag {
-            font-size: 11px;
-            font-weight: 700;
-            letter-spacing: 0.5px;
-            text-transform: uppercase;
-            color: var(--teal);
-        }
-
-        .cp-mode-card.emergency .cp-mode-card-tag { color: var(--coral); }
-        .cp-mode-card.tourism .cp-mode-card-tag { color: var(--teal-deep); }
-        .cp-mode-card.fisherman .cp-mode-card-tag { color: var(--slate); }
-
-        .cp-mode-card h3 {
-            margin: 0;
-            font-size: 16.5px;
-            color: var(--navy);
-        }
-
-        .cp-mode-card-desc {
-            margin: 0;
-            font-size: 12.5px;
-            line-height: 1.55;
-            color: var(--slate);
-            flex: 1;
-        }
-
-        .cp-mode-card-headline {
-            display: flex;
-            align-items: baseline;
-            gap: 8px;
-            flex-wrap: wrap;
-        }
-
-        .cp-mode-card-value {
-            font-family: "IBM Plex Mono", monospace;
-            font-size: 22px;
-            font-weight: 500;
-            color: var(--navy);
-        }
-
-        .cp-mode-card-stat {
-            margin-top: auto;
-            padding-top: 12px;
-            border-top: 1px dashed var(--paper-line);
-            font-family: "IBM Plex Mono", monospace;
-            font-size: 11.5px;
-            color: var(--ink);
-        }
-
-        a.cp-mode-card-link {
+        a.cp-ledger-row-link {
             display: block;
             color: inherit;
         }
 
-        a.cp-mode-card-link:hover .cp-mode-card,
-        a.cp-mode-card-link:focus-visible .cp-mode-card {
-            box-shadow: 0 10px 24px rgba(11,37,49,0.12);
-            transform: translateY(-3px);
+        .cp-ledger-row {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            padding: 18px 14px;
+            margin: 0 -14px;
+            border-bottom: 1px solid var(--paper-line);
+            border-left: 3px solid transparent;
+            transition: background 0.12s ease, border-left-color 0.12s ease;
         }
 
-        a.cp-mode-card-link:focus-visible {
+        a.cp-ledger-row-link:hover .cp-ledger-row,
+        a.cp-ledger-row-link:focus-visible .cp-ledger-row {
+            background: #EFE7D4;
+            border-left-color: var(--teal);
+        }
+
+        a.cp-ledger-row-link:focus-visible {
             outline: none;
         }
 
-        a.cp-mode-card-link:focus-visible .cp-mode-card {
+        a.cp-ledger-row-link:focus-visible .cp-ledger-row {
             outline: 2px solid var(--coral);
-            outline-offset: 2px;
+            outline-offset: -2px;
         }
 
-        @media (max-width: 900px) {
-            .cp-mode-grid { grid-template-columns: 1fr; }
+        .cp-ledger-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .cp-ledger-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            color: var(--navy);
+        }
+
+        .cp-ledger-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--teal);
+            flex-shrink: 0;
+        }
+
+        .cp-ledger-dot.emergency { background: var(--coral); }
+        .cp-ledger-dot.tourism { background: var(--teal); }
+        .cp-ledger-dot.fisherman { background: var(--slate); }
+
+        .cp-ledger-status {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--slate);
+        }
+
+        .cp-ledger-meta {
+            font-size: 12px;
+            color: var(--slate);
+        }
+
+        .cp-ledger-body {
+            display: flex;
+            align-items: baseline;
+            gap: 14px;
+            flex-wrap: wrap;
+        }
+
+        .cp-ledger-value {
+            font-family: "IBM Plex Mono", monospace;
+            font-size: 20px;
+            font-weight: 500;
+            color: var(--navy);
+            min-width: 64px;
+        }
+
+        .cp-ledger-bar-track {
+            flex: 1;
+            min-width: 100px;
+            height: 6px;
+            border-radius: 3px;
+            background: var(--paper-line);
+            overflow: hidden;
+        }
+
+        .cp-ledger-bar-fill {
+            height: 100%;
+            border-radius: 3px;
+            background: var(--teal);
+        }
+
+        .cp-ledger-desc {
+            margin: 0;
+            font-size: 12.5px;
+            line-height: 1.55;
+            color: var(--slate);
+        }
+
+        .cp-ledger-stat {
+            font-family: "IBM Plex Mono", monospace;
+            font-size: 12px;
+            color: var(--ink);
+            white-space: nowrap;
         }
 
         .cp-badge {

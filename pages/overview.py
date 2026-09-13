@@ -19,13 +19,16 @@ come from page_helpers.py unchanged, so Overview's meaning matches
 Emergency/Tourism exactly even before those pages get the same visual
 treatment.
 
-DESIGN PASS (this revision): the hero graphic's coral position-dot was a
-flat 2.5px circle competing on equal footing with five wave-contour
-lines of similar visual weight, so it read as a stray mark rather than
-an intentional "you are here" marker echoing the brand dot. Gave it a
-soft halo (a larger, low-opacity circle underneath) — same motif used
-for map pins — without adding motion or new elements. No structural
-change.
+DESIGN PASS (this revision): the two sections below the map (the
+per-location snapshot and the "which view is for you" picker) went
+through two rounds — a plain HTML table + a plain vertical list first
+("just lists"), then a boxed 3-card grid (rejected as reading like a
+generic dashboard template). Both are now LEDGER ROWS instead
+(.cp-ledger/.cp-ledger-row in app.py's CSS): hairline dividers, mono
+numerals, a small colored dot per mode, and a magnitude bar for the
+snapshot's real numbers — staying in the same tide-table language the
+hero's stat-strip and Emergency's own tables already use, instead of
+introducing a boxed-card idiom the rest of the app doesn't have.
 """
 
 import dash
@@ -76,19 +79,19 @@ hero = html.Div(
     [
         html.Div(
             [
-                html.Div("Coastal intelligence \u2014 Sri Lanka", className="cp-hero-kicker"),
+                html.Div("Coastal intelligence — Sri Lanka", className="cp-hero-kicker"),
                 html.H1("Coastal conditions, read the way a chart reads them."),
                 html.P(
                     "CoastalPulse turns marine, weather, and air-quality data "
                     "for 15 coastal locations into one answer for whoever's "
-                    "asking \u2014 a tourist checking the beach, a resident "
+                    "asking — a tourist checking the beach, a resident "
                     "tracking a storm, a fisherman deciding whether to go out."
                 ),
                 html.Div(
                     [
-                        _stat(html.Span("\u2014", id="overview-stat-safe-value"), "Locations safe today"),
-                        _stat(html.Span("\u2014", id="overview-stat-caution-value"), "Under caution or warning"),
-                        _stat(html.Span("\u2014", id="overview-stat-best-value"), html.Span("Best beach score today", id="overview-stat-best-label")),
+                        _stat(html.Span("—", id="overview-stat-safe-value"), "Locations safe today"),
+                        _stat(html.Span("—", id="overview-stat-caution-value"), "Under caution or warning"),
+                        _stat(html.Span("—", id="overview-stat-best-value"), html.Span("Best beach score today", id="overview-stat-best-label")),
                     ],
                     className="cp-stat-strip",
                 ),
@@ -215,42 +218,62 @@ def _build_highlight(safe, caution, dangerous, total, best_name, best_score):
 
 
 # ============================================================
-# MODE CARDS — shared by the audience picker below (Sri-Lanka-wide,
-# static description + a live one-line stat) and the per-location
-# snapshot further up (live badge/value only, no description). Both
-# use the same .cp-mode-card/.cp-mode-grid CSS so the page reads as
-# one card system, not a table and a separate list.
+# LEDGER ROWS — shared row idiom for both the audience picker
+# below (Sri-Lanka-wide, description + a live one-line stat) and
+# the per-location snapshot further up (a real number + magnitude
+# bar). Both use .cp-ledger/.cp-ledger-row (app.py) so the page
+# reads as one system in the same hairline-row language the hero's
+# stat-strip already uses, instead of a boxed-card idiom.
 # ============================================================
 
 MODE_CLASS = {"Emergency": "emergency", "Tourism": "tourism", "Fisherman": "fisherman"}
 
+# Scale each mode's number is read against for the magnitude bar — wave
+# height (Emergency/Fisherman) shares the same 5m gauge max used on their
+# own pages (emergency.py/fisherman.py); suitability score is 0-100.
+MODE_BAR_MAX = {"Emergency": 5.0, "Tourism": 100.0, "Fisherman": 5.0}
 
-def _mode_card(mode, children, href=None):
-    card = html.Div(children, className=f"cp-mode-card {MODE_CLASS.get(mode, '')}".strip())
-    if href:
-        return dcc.Link(card, href=href, className="cp-mode-card-link")
-    return card
+
+def _ledger_dot(mode):
+    return html.Div(className=f"cp-ledger-dot {MODE_CLASS.get(mode, '')}".strip())
+
+
+def _bar_fill_pct(value, value_max):
+    if value is None or not value_max:
+        return 0
+    try:
+        pct = (float(value) / float(value_max)) * 100
+    except (TypeError, ValueError):
+        return 0
+    if pct != pct:  # NaN
+        return 0
+    return max(0, min(100, pct))
 
 
 # ============================================================
-# AUDIENCE NAVIGATION — one card per mode, ordered to match the
-# header nav (Emergency, Tourism, Fisherman). Each card carries a
+# AUDIENCE NAVIGATION — one row per mode, ordered to match the
+# header nav (Emergency, Tourism, Fisherman). Each row carries a
 # live one-line stat (filled by update_overview_live below) instead
 # of being pure static marketing copy, so this section is real
 # dashboard content, not just a list of links.
 # ============================================================
 
-def _audience_card(mode, title, description, href, stat_id):
-    return _mode_card(
-        mode,
+def _audience_row(mode, title, description, href, stat_id):
+    row = html.Div(
         [
-            html.Div(mode, className="cp-mode-card-tag"),
-            html.H3(title),
-            html.P(description, className="cp-mode-card-desc"),
-            html.Div(id=stat_id, className="cp-mode-card-stat"),
+            html.Div(
+                [
+                    html.Div([_ledger_dot(mode), html.Span(mode)], className="cp-ledger-label"),
+                    html.Div(id=stat_id, className="cp-ledger-stat"),
+                ],
+                className="cp-ledger-head",
+            ),
+            html.H3(title, style={"margin": "2px 0 0", "fontSize": "15.5px", "color": "var(--navy)"}),
+            html.P(description, className="cp-ledger-desc"),
         ],
-        href=href,
+        className="cp-ledger-row",
     )
+    return dcc.Link(row, href=href, className="cp-ledger-row-link")
 
 
 nav_section = html.Div(
@@ -259,23 +282,23 @@ nav_section = html.Div(
         html.Div("Three ways to read the same coastline.", className="cp-section-sub"),
         html.Div(
             [
-                _audience_card(
+                _audience_row(
                     "Emergency", "Living on the coast",
                     "Current risk and hazard status for your area.",
                     "/emergency", "overview-mode-stat-emergency",
                 ),
-                _audience_card(
+                _audience_row(
                     "Tourism", "Visiting the beach",
                     "Beach conditions and whether today is a good day to go.",
                     "/tourism", "overview-mode-stat-tourism",
                 ),
-                _audience_card(
+                _audience_row(
                     "Fisherman", "Going out to fish",
                     "Marine conditions and forecast for the day ahead.",
                     "/fisherman", "overview-mode-stat-fisherman",
                 ),
             ],
-            className="cp-mode-grid",
+            className="cp-ledger",
         ),
     ],
     className="cp-section",
@@ -283,8 +306,9 @@ nav_section = html.Div(
 
 
 # ============================================================
-# PER-LOCATION SNAPSHOT (tide-table style, one location, three
-# rows — Emergency / Tourism / Fisherman)
+# PER-LOCATION SNAPSHOT (tide-table/ledger style, one location,
+# three rows — Emergency / Tourism / Fisherman — each with a real
+# number and a magnitude bar instead of a plain table cell)
 # ============================================================
 
 snapshot_section = html.Div(
@@ -297,10 +321,10 @@ snapshot_section = html.Div(
             className="cp-snapshot-header",
         ),
         html.Div(
-            "Location-specific \u2014 switch location in the header to see a different area.",
+            "Location-specific — switch location in the header to see a different area.",
             className="cp-section-sub",
         ),
-        html.Div(id="overview-snapshot-cards", className="cp-mode-grid"),
+        html.Div(id="overview-snapshot-rows", className="cp-ledger"),
     ],
     className="cp-section",
 )
@@ -411,7 +435,7 @@ def update_overview_live(pathname):
     highlight = _build_highlight(safe_count, caution_count, dangerous_count, total_count, best_name, best_score)
     map_fig = _build_overview_map(latest_em)
 
-    # --- Mode-picker live stats — one honest, real-data line per card,
+    # --- Mode-picker live stats — one honest, real-data line per row,
     # instead of pure static marketing copy. ---------------------------
     mode_stat_emergency = (
         f"{safe_count}/{total_count} locations Safe today" if total_count else "Live status unavailable"
@@ -436,39 +460,53 @@ def update_overview_live(pathname):
     )
 
 
-def _snapshot_card(mode, value_text, badge_text, badge_color, note_text, href):
-    return _mode_card(
-        mode,
+def _snapshot_row(mode, location, value_text, value, status_text, status_color, meta_text, href):
+    bar_style = {"width": f"{_bar_fill_pct(value, MODE_BAR_MAX.get(mode)):.0f}%"}
+    if status_color:
+        bar_style["backgroundColor"] = status_color
+
+    row = html.Div(
         [
-            html.Div(mode, className="cp-mode-card-tag"),
             html.Div(
                 [
-                    html.Span(value_text, className="cp-mode-card-value"),
-                    _badge(badge_text, badge_color) if badge_text else None,
+                    html.Div([_ledger_dot(mode), html.Span(mode)], className="cp-ledger-label"),
+                    html.Div(
+                        status_text or "",
+                        className="cp-ledger-status",
+                        style={"color": status_color} if status_color else None,
+                    ),
                 ],
-                className="cp-mode-card-headline",
+                className="cp-ledger-head",
             ),
-            html.P(note_text, className="cp-mode-card-desc"),
+            html.Div(f"{location} · {meta_text}", className="cp-ledger-meta"),
+            html.Div(
+                [
+                    html.Span(value_text, className="cp-ledger-value"),
+                    html.Div(html.Div(className="cp-ledger-bar-fill", style=bar_style), className="cp-ledger-bar-track"),
+                ],
+                className="cp-ledger-body",
+            ),
         ],
-        href=href,
+        className="cp-ledger-row",
     )
+    return dcc.Link(row, href=href, className="cp-ledger-row-link")
 
 
 @callback(
     Output("overview-snapshot-title", "children"),
     Output("overview-snapshot-scope", "children"),
-    Output("overview-snapshot-cards", "children"),
+    Output("overview-snapshot-rows", "children"),
     Input("selected-location", "data"),
 )
 def update_overview_snapshot(location):
     if not location:
         return "Today's readings", "", []
 
-    title = f"Today's readings \u2014 {location}"
+    title = f"Today's readings — {location}"
     scope = "updated daily"
-    cards = []
+    rows = []
 
-    # --- Emergency card ---------------------------------------------------
+    # --- Emergency row ------------------------------------------------------
     em_df = get_emergency_data(location)
     if not em_df.empty:
         latest = em_df.iloc[-1]
@@ -476,35 +514,35 @@ def update_overview_snapshot(location):
         color = CLASSIFICATION_COLORS.get(status, "#999")
         wave = latest.get("wave_height_max")
         note = EMERGENCY_VERDICT_TEXT.get(status, "conditions unknown")
-        wave_text = f"{wave:.1f}m" if wave is not None and pd.notna(wave) else "\u2014"
-        cards.append(_snapshot_card("Emergency", wave_text, status, color, note, "/emergency"))
+        wave_text = f"{wave:.1f}m" if wave is not None and pd.notna(wave) else "—"
+        rows.append(_snapshot_row("Emergency", location, wave_text, wave, status, color, note, "/emergency"))
     else:
-        cards.append(_snapshot_card("Emergency", "\u2014", None, None, "No data yet for this location.", "/emergency"))
+        rows.append(_snapshot_row("Emergency", location, "—", None, None, None, "No data yet for this location.", "/emergency"))
 
-    # --- Tourism card -------------------------------------------------------
+    # --- Tourism row ----------------------------------------------------------
     tm_df = get_tourism_data(location)
     if not tm_df.empty:
         latest = tm_df.iloc[-1]
         score = latest.get("suitability_score")
         label, color = score_band(score)
-        value_text = f"{score:.0f}/100" if score is not None and pd.notna(score) else "\u2014"
-        cards.append(_snapshot_card("Tourism", value_text, None, color, label, "/tourism"))
+        value_text = f"{score:.0f}/100" if score is not None and pd.notna(score) else "—"
+        rows.append(_snapshot_row("Tourism", location, value_text, score, None, color, label, "/tourism"))
     else:
-        cards.append(_snapshot_card("Tourism", "\u2014", None, None, "No data yet for this location.", "/tourism"))
+        rows.append(_snapshot_row("Tourism", location, "—", None, None, None, "No data yet for this location.", "/tourism"))
 
-    # --- Fisherman card (real SARIMA forecast, see pipeline/build_forecasts.py) ---
+    # --- Fisherman row (real SARIMA forecast, see pipeline/build_forecasts.py) ---
     fc_df = get_fisherman_forecast(location)
     if not fc_df.empty:
         next_hour = fc_df.iloc[0]
         wave = next_hour.get("wave_height_forecast")
         status = _classify_wave(wave)
         color = CLASSIFICATION_COLORS.get(status, "#999")
-        wave_text = f"{wave:.1f}m" if wave is not None and pd.notna(wave) else "\u2014"
+        wave_text = f"{wave:.1f}m" if wave is not None and pd.notna(wave) else "—"
         forecast_time = next_hour.get("forecast_time")
         time_text = forecast_time.strftime("%H:%M") if forecast_time is not None and pd.notna(forecast_time) else ""
-        note = f"48h wave forecast \u2014 next reading {time_text}" if time_text else "48h wave forecast"
-        cards.append(_snapshot_card("Fisherman", wave_text, status, color, note, "/fisherman"))
+        note = f"48h wave forecast — next reading {time_text}" if time_text else "48h wave forecast"
+        rows.append(_snapshot_row("Fisherman", location, wave_text, wave, status, color, note, "/fisherman"))
     else:
-        cards.append(_snapshot_card("Fisherman", "\u2014", None, None, "No forecast yet for this location.", "/fisherman"))
+        rows.append(_snapshot_row("Fisherman", location, "—", None, None, None, "No forecast yet for this location.", "/fisherman"))
 
-    return title, scope, cards
+    return title, scope, rows
