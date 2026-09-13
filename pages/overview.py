@@ -319,10 +319,7 @@ snapshot_section = html.Div(
                 html.Div(id="overview-snapshot-scope", className="cp-snapshot-scope"),
             ],
             className="cp-snapshot-header",
-        ),
-        html.Div(
-            "Location-specific — switch location in the header to see a different area.",
-            className="cp-section-sub",
+            style={"marginBottom": "20px"},
         ),
         html.Div(id="overview-snapshot-rows", className="cp-ledger"),
     ],
