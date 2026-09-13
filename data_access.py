@@ -353,7 +353,7 @@ def get_fisherman_silver(location: str, days_back: int = 30) -> pd.DataFrame:
 
 
 @cache_stub
-def get_fisherman_forecast(location: str) -> pd.DataFrame:
+def get_fisherman_forecast(location: str | None = None) -> pd.DataFrame:
     """
     Pulls the 48-hour-ahead wave_height forecast from the `forecasts` table,
     written by pipeline/build_forecasts.py (a per-location SARIMA model
@@ -363,19 +363,22 @@ def get_fisherman_forecast(location: str) -> pd.DataFrame:
     for this location the last time the pipeline ran — so the UI can show
     an honest error margin instead of implying the forecast is exact.
 
+    location=None returns all 15 locations (~720 rows total, well under
+    PostgREST's 1000-row cap, but routed through _fetch_all_rows anyway —
+    same reasoning as get_emergency_data/get_tourism_data: a table that's
+    small today isn't a promise it stays that way, and the compound
+    ["forecast_time", "location_name"] order avoids the tie-ordering bug
+    _fetch_all_rows's own docstring describes). Used by Overview's
+    Sri-Lanka-wide mode-picker stat, not by Fisherman mode itself (which
+    always passes a single location).
+
     Returns an empty DataFrame (not mock data) if the pipeline hasn't been
     run yet for this location — the UI is responsible for saying so.
     """
     _validate_location(location)
-    resp = (
-        get_client()
-        .table("forecasts")
-        .select("*")
-        .eq("location_name", location)
-        .order("forecast_time")
-        .execute()
-    )
-    df = pd.DataFrame(resp.data)
+    eq = ("location_name", location) if location else None
+    rows = _fetch_all_rows("forecasts", order=["forecast_time", "location_name"], eq=eq)
+    df = pd.DataFrame(rows)
     if not df.empty:
         df["forecast_time"] = pd.to_datetime(df["forecast_time"])
         df["generated_at"] = pd.to_datetime(df["generated_at"])

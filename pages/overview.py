@@ -215,18 +215,40 @@ def _build_highlight(safe, caution, dangerous, total, best_name, best_score):
 
 
 # ============================================================
-# AUDIENCE NAVIGATION (asymmetric legend list, not equal cards)
+# MODE CARDS — shared by the audience picker below (Sri-Lanka-wide,
+# static description + a live one-line stat) and the per-location
+# snapshot further up (live badge/value only, no description). Both
+# use the same .cp-mode-card/.cp-mode-grid CSS so the page reads as
+# one card system, not a table and a separate list.
 # ============================================================
 
-def _audience_row(tag, title, description, href):
-    return dcc.Link(
-        html.Div(
-            [
-                html.Div(tag, className="cp-audience-tag"),
-                html.Div([html.H3(title), html.P(description)]),
-            ],
-            className="cp-audience-row",
-        ),
+MODE_CLASS = {"Emergency": "emergency", "Tourism": "tourism", "Fisherman": "fisherman"}
+
+
+def _mode_card(mode, children, href=None):
+    card = html.Div(children, className=f"cp-mode-card {MODE_CLASS.get(mode, '')}".strip())
+    if href:
+        return dcc.Link(card, href=href, className="cp-mode-card-link")
+    return card
+
+
+# ============================================================
+# AUDIENCE NAVIGATION — one card per mode, ordered to match the
+# header nav (Emergency, Tourism, Fisherman). Each card carries a
+# live one-line stat (filled by update_overview_live below) instead
+# of being pure static marketing copy, so this section is real
+# dashboard content, not just a list of links.
+# ============================================================
+
+def _audience_card(mode, title, description, href, stat_id):
+    return _mode_card(
+        mode,
+        [
+            html.Div(mode, className="cp-mode-card-tag"),
+            html.H3(title),
+            html.P(description, className="cp-mode-card-desc"),
+            html.Div(id=stat_id, className="cp-mode-card-stat"),
+        ],
         href=href,
     )
 
@@ -237,23 +259,23 @@ nav_section = html.Div(
         html.Div("Three ways to read the same coastline.", className="cp-section-sub"),
         html.Div(
             [
-                _audience_row(
-                    "Tourism", "Visiting the beach",
-                    "Beach conditions and whether today is a good day to go.",
-                    "/tourism",
-                ),
-                _audience_row(
+                _audience_card(
                     "Emergency", "Living on the coast",
                     "Current risk and hazard status for your area.",
-                    "/emergency",
+                    "/emergency", "overview-mode-stat-emergency",
                 ),
-                _audience_row(
+                _audience_card(
+                    "Tourism", "Visiting the beach",
+                    "Beach conditions and whether today is a good day to go.",
+                    "/tourism", "overview-mode-stat-tourism",
+                ),
+                _audience_card(
                     "Fisherman", "Going out to fish",
                     "Marine conditions and forecast for the day ahead.",
-                    "/fisherman",
+                    "/fisherman", "overview-mode-stat-fisherman",
                 ),
             ],
-            className="cp-audience-list",
+            className="cp-mode-grid",
         ),
     ],
     className="cp-section",
@@ -278,13 +300,7 @@ snapshot_section = html.Div(
             "Location-specific \u2014 switch location in the header to see a different area.",
             className="cp-section-sub",
         ),
-        html.Table(
-            [
-                html.Thead(html.Tr([html.Th("Mode"), html.Th("Status"), html.Th("Note")])),
-                html.Tbody(id="overview-snapshot-rows"),
-            ],
-            className="cp-tide",
-        ),
+        html.Div(id="overview-snapshot-cards", className="cp-mode-grid"),
     ],
     className="cp-section",
 )
@@ -310,6 +326,20 @@ def _badge(text, color):
     return html.Span(text, className="cp-badge", style={"backgroundColor": color})
 
 
+# Same thresholds as pipeline/build_gold.py's classify_wave_height() / the
+# local copies in pages/emergency.py and pages/fisherman.py — the forecasts
+# table only stores the raw wave_height_forecast number, not a
+# classification, so this row has to derive one the same way those pages do.
+def _classify_wave(value):
+    if value is None or pd.isna(value):
+        return None
+    if value < 2.0:
+        return "Safe"
+    if value <= 3.0:
+        return "Caution"
+    return "Dangerous"
+
+
 # ============================================================
 # LIVE STATS + MAP — Sri-Lanka-wide, so this fires once per page
 # load (on the "/" route) rather than on every location change like
@@ -323,11 +353,14 @@ def _badge(text, color):
     Output("overview-stat-best-label", "children"),
     Output("overview-highlight", "children"),
     Output("overview-map", "figure"),
+    Output("overview-mode-stat-emergency", "children"),
+    Output("overview-mode-stat-tourism", "children"),
+    Output("overview-mode-stat-fisherman", "children"),
     Input("url", "pathname"),
 )
 def update_overview_live(pathname):
     if pathname not in ("/", None):
-        return (dash.no_update,) * 6
+        return (dash.no_update,) * 9
 
     try:
         em_df = get_emergency_data()
@@ -338,6 +371,11 @@ def update_overview_live(pathname):
         tm_df = get_tourism_data()
     except Exception:
         tm_df = pd.DataFrame()
+
+    try:
+        fc_df = get_fisherman_forecast()
+    except Exception:
+        fc_df = pd.DataFrame()
 
     latest_em = pd.DataFrame()
     if em_df is not None and not em_df.empty:
@@ -373,13 +411,53 @@ def update_overview_live(pathname):
     highlight = _build_highlight(safe_count, caution_count, dangerous_count, total_count, best_name, best_score)
     map_fig = _build_overview_map(latest_em)
 
-    return safe_text, caution_text, best_value_text, best_label_text, highlight, map_fig
+    # --- Mode-picker live stats — one honest, real-data line per card,
+    # instead of pure static marketing copy. ---------------------------
+    mode_stat_emergency = (
+        f"{safe_count}/{total_count} locations Safe today" if total_count else "Live status unavailable"
+    )
+
+    mode_stat_tourism = (
+        f"Best today: {best_name} — {best_score:.0f}/100" if best_name else "Live suitability scores, 15 locations"
+    )
+
+    mode_stat_fisherman = "48h forecasts not generated yet"
+    if fc_df is not None and not fc_df.empty:
+        fc = fc_df.copy().sort_values(["location_name", "forecast_time"])
+        earliest = fc.groupby("location_name", as_index=False).first()
+        earliest["classification"] = earliest["wave_height_forecast"].apply(_classify_wave)
+        n_safe = int((earliest["classification"] == "Safe").sum())
+        n_total = len(earliest)
+        mode_stat_fisherman = f"{n_safe}/{n_total} locations forecast Safe soon" if n_total else mode_stat_fisherman
+
+    return (
+        safe_text, caution_text, best_value_text, best_label_text, highlight, map_fig,
+        mode_stat_emergency, mode_stat_tourism, mode_stat_fisherman,
+    )
+
+
+def _snapshot_card(mode, value_text, badge_text, badge_color, note_text, href):
+    return _mode_card(
+        mode,
+        [
+            html.Div(mode, className="cp-mode-card-tag"),
+            html.Div(
+                [
+                    html.Span(value_text, className="cp-mode-card-value"),
+                    _badge(badge_text, badge_color) if badge_text else None,
+                ],
+                className="cp-mode-card-headline",
+            ),
+            html.P(note_text, className="cp-mode-card-desc"),
+        ],
+        href=href,
+    )
 
 
 @callback(
     Output("overview-snapshot-title", "children"),
     Output("overview-snapshot-scope", "children"),
-    Output("overview-snapshot-rows", "children"),
+    Output("overview-snapshot-cards", "children"),
     Input("selected-location", "data"),
 )
 def update_overview_snapshot(location):
@@ -388,9 +466,9 @@ def update_overview_snapshot(location):
 
     title = f"Today's readings \u2014 {location}"
     scope = "updated daily"
-    rows = []
+    cards = []
 
-    # --- Emergency row --------------------------------------------------
+    # --- Emergency card ---------------------------------------------------
     em_df = get_emergency_data(location)
     if not em_df.empty:
         latest = em_df.iloc[-1]
@@ -398,47 +476,35 @@ def update_overview_snapshot(location):
         color = CLASSIFICATION_COLORS.get(status, "#999")
         wave = latest.get("wave_height_max")
         note = EMERGENCY_VERDICT_TEXT.get(status, "conditions unknown")
-        rows.append(
-            html.Tr([
-                html.Td("Emergency"),
-                html.Td([
-                    _badge(status, color), " ",
-                    html.Span(f"{wave:.1f}m" if wave is not None else "\u2014", className="cp-mono cp-note-muted"),
-                ]),
-                html.Td(note, className="cp-note-muted"),
-            ])
-        )
+        wave_text = f"{wave:.1f}m" if wave is not None and pd.notna(wave) else "\u2014"
+        cards.append(_snapshot_card("Emergency", wave_text, status, color, note, "/emergency"))
     else:
-        rows.append(html.Tr([html.Td("Emergency"), html.Td("No data"), html.Td("")]))
+        cards.append(_snapshot_card("Emergency", "\u2014", None, None, "No data yet for this location.", "/emergency"))
 
-    # --- Tourism row ------------------------------------------------------
+    # --- Tourism card -------------------------------------------------------
     tm_df = get_tourism_data(location)
     if not tm_df.empty:
         latest = tm_df.iloc[-1]
         score = latest.get("suitability_score")
         label, color = score_band(score)
-        badge_text = f"{score:.0f}/100" if score is not None else "\u2014"
-        rows.append(
-            html.Tr([
-                html.Td("Tourism"),
-                html.Td(_badge(badge_text, color)),
-                html.Td(label, className="cp-note-muted"),
-            ])
-        )
+        value_text = f"{score:.0f}/100" if score is not None and pd.notna(score) else "\u2014"
+        cards.append(_snapshot_card("Tourism", value_text, None, color, label, "/tourism"))
     else:
-        rows.append(html.Tr([html.Td("Tourism"), html.Td("No data"), html.Td("")]))
+        cards.append(_snapshot_card("Tourism", "\u2014", None, None, "No data yet for this location.", "/tourism"))
 
-    # --- Fisherman row (still mock data \u2014 say so) --------------------
+    # --- Fisherman card (real SARIMA forecast, see pipeline/build_forecasts.py) ---
     fc_df = get_fisherman_forecast(location)
     if not fc_df.empty:
-        rows.append(
-            html.Tr([
-                html.Td("Fisherman"),
-                html.Td(_badge("Preview", "#999")),
-                html.Td("Forecast model not built yet \u2014 placeholder data.", className="cp-note-muted"),
-            ])
-        )
+        next_hour = fc_df.iloc[0]
+        wave = next_hour.get("wave_height_forecast")
+        status = _classify_wave(wave)
+        color = CLASSIFICATION_COLORS.get(status, "#999")
+        wave_text = f"{wave:.1f}m" if wave is not None and pd.notna(wave) else "\u2014"
+        forecast_time = next_hour.get("forecast_time")
+        time_text = forecast_time.strftime("%H:%M") if forecast_time is not None and pd.notna(forecast_time) else ""
+        note = f"48h wave forecast \u2014 next reading {time_text}" if time_text else "48h wave forecast"
+        cards.append(_snapshot_card("Fisherman", wave_text, status, color, note, "/fisherman"))
     else:
-        rows.append(html.Tr([html.Td("Fisherman"), html.Td("No data"), html.Td("")]))
+        cards.append(_snapshot_card("Fisherman", "\u2014", None, None, "No forecast yet for this location.", "/fisherman"))
 
-    return title, scope, rows
+    return title, scope, cards

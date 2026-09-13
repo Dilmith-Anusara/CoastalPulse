@@ -603,8 +603,7 @@ dash_app.index_string = """
 
 
         /* ==================================================
-           OVERVIEW: AUDIENCE LIST (asymmetric legend rows,
-           not a uniform SaaS card grid)
+           SECTION SCAFFOLDING
         ================================================== */
 
         .cp-section {
@@ -623,65 +622,6 @@ dash_app.index_string = """
             margin: 0 0 20px 0;
         }
 
-        .cp-audience-list {
-            border-top: 1px solid var(--navy);
-        }
-
-        .cp-audience-row {
-            display: grid;
-            grid-template-columns: 150px 1fr;
-            gap: 28px;
-            align-items: baseline;
-
-            padding: 18px 12px;
-            margin-left: -12px;
-            border-bottom: 1px solid var(--paper-line);
-            border-left: 3px solid transparent;
-
-            color: var(--ink);
-
-            transition: background 0.12s ease, border-left-color 0.12s ease;
-        }
-
-        .cp-audience-row:hover {
-            background: #EFE7D4;
-            border-left-color: var(--teal);
-        }
-
-        a:focus-visible > .cp-audience-row {
-            background: #EFE7D4;
-            border-left-color: var(--teal);
-            outline: none;
-        }
-
-        .cp-audience-tag {
-            font-size: 12px;
-            font-weight: 600;
-            color: var(--slate);
-        }
-
-        .cp-audience-row h3 {
-            font-size: 16px;
-            margin: 0;
-            display: block;
-        }
-
-        .cp-audience-row p {
-            font-size: 13px;
-            color: var(--slate);
-            line-height: 1.5;
-            margin: 4px 0 0 0;
-        }
-
-
-        /* ==================================================
-           OVERVIEW: SNAPSHOT (tide-table style — dense rows,
-           mono numerals — for the ONE selected location; this is
-           deliberately not a multi-location table, since every
-           Gold table here is location-wise and this section
-           should not read as a Sri-Lanka-wide summary)
-        ================================================== */
-
         .cp-snapshot-header {
             display: flex;
             justify-content: space-between;
@@ -694,26 +634,114 @@ dash_app.index_string = """
             color: #9AA8A6;
         }
 
-        table.cp-tide {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 8px;
-            font-size: 13.5px;
+
+        /* ==================================================
+           MODE CARDS — shared grid/card idiom for both the
+           Overview snapshot (one location, 3 modes) and the
+           "which view is for you" picker (Sri-Lanka-wide, 3
+           modes). Replaces a plain table and a plain vertical
+           list with the same component so the page reads as
+           one system rather than two different list styles.
+           Each mode gets its own identity color via a modifier
+           class (.emergency/.tourism/.fisherman) reused by both
+           sections, so the color coding means the same thing
+           everywhere on the page.
+        ================================================== */
+
+        .cp-mode-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
         }
 
-        table.cp-tide thead th {
-            text-align: left;
-            font-weight: 600;
+        .cp-mode-card {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            height: 100%;
+            background: #ffffff;
+            border: 1px solid var(--paper-line);
+            border-top: 3px solid var(--teal);
+            border-radius: 10px;
+            padding: 22px;
+            transition: box-shadow 0.15s ease, transform 0.15s ease;
+        }
+
+        .cp-mode-card.emergency { border-top-color: var(--coral); }
+        .cp-mode-card.tourism { border-top-color: var(--teal); }
+        .cp-mode-card.fisherman { border-top-color: var(--slate); }
+
+        .cp-mode-card-tag {
             font-size: 11px;
-            color: var(--slate);
-            padding: 0 14px 10px 0;
-            border-bottom: 1px solid var(--navy);
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            color: var(--teal);
         }
 
-        table.cp-tide tbody td {
-            padding: 13px 14px 13px 0;
-            border-bottom: 1px solid var(--paper-line);
-            vertical-align: middle;
+        .cp-mode-card.emergency .cp-mode-card-tag { color: var(--coral); }
+        .cp-mode-card.tourism .cp-mode-card-tag { color: var(--teal-deep); }
+        .cp-mode-card.fisherman .cp-mode-card-tag { color: var(--slate); }
+
+        .cp-mode-card h3 {
+            margin: 0;
+            font-size: 16.5px;
+            color: var(--navy);
+        }
+
+        .cp-mode-card-desc {
+            margin: 0;
+            font-size: 12.5px;
+            line-height: 1.55;
+            color: var(--slate);
+            flex: 1;
+        }
+
+        .cp-mode-card-headline {
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .cp-mode-card-value {
+            font-family: "IBM Plex Mono", monospace;
+            font-size: 22px;
+            font-weight: 500;
+            color: var(--navy);
+        }
+
+        .cp-mode-card-stat {
+            margin-top: auto;
+            padding-top: 12px;
+            border-top: 1px dashed var(--paper-line);
+            font-family: "IBM Plex Mono", monospace;
+            font-size: 11.5px;
+            color: var(--ink);
+        }
+
+        a.cp-mode-card-link {
+            display: block;
+            color: inherit;
+        }
+
+        a.cp-mode-card-link:hover .cp-mode-card,
+        a.cp-mode-card-link:focus-visible .cp-mode-card {
+            box-shadow: 0 10px 24px rgba(11,37,49,0.12);
+            transform: translateY(-3px);
+        }
+
+        a.cp-mode-card-link:focus-visible {
+            outline: none;
+        }
+
+        a.cp-mode-card-link:focus-visible .cp-mode-card {
+            outline: 2px solid var(--coral);
+            outline-offset: 2px;
+        }
+
+        @media (max-width: 900px) {
+            .cp-mode-grid { grid-template-columns: 1fr; }
         }
 
         .cp-badge {
@@ -797,8 +825,8 @@ navigation = html.Nav(
         nav_link("Overview", "/", "overview"),
         nav_link("Emergency", "/emergency", "emergency"),
         nav_link("Tourism", "/tourism", "tourism"),
-        nav_link("Analytics", "/analytics", "analytics"),
         nav_link("Fisherman", "/fisherman", "fisherman"),
+        nav_link("Analytics", "/analytics", "analytics"),
     ],
     className="cp-navigation",
 )

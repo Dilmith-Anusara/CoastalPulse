@@ -69,6 +69,17 @@ WAVE_GAUGE_MAX = 5.0
 
 HISTORY_MIN_ROWS = 30
 
+# Locations where wave height doesn't reliably reflect wind conditions —
+# from validation_scripts/eda_weather_indicators.ipynb Section 9.4 (real
+# same-hour wind_speed vs wave_height correlation, computed across all 15
+# locations' full hourly history): these three sit at r=0.35-0.40, the
+# loosest relationships in the dataset, vs. ~0.61 average and ~0.65-0.88
+# everywhere else. A fisherman here can face meaningful wind even when the
+# wave-height verdict above reads calm, since there's no wind forecast
+# model (see Section 9's feasibility finding — technically buildable, but
+# not built, since wind is ~9x noisier hour-to-hour than wave height).
+LOW_WIND_WAVE_CORRELATION_LOCATIONS = {"Trincomalee", "Batticaloa", "Arugam Bay"}
+
 # Fishing-specific phrasing — Emergency's copy is written for "is it safe
 # to swim/be near the coast", not "should a boat go out", so this page
 # uses its own sentences against the same classification labels and
@@ -264,6 +275,21 @@ def _conditions_grid(latest_row):
     )
 
 
+def _wind_wave_note(location):
+    """Shown only at the 3 locations where wave height and wind speed are
+    only loosely linked (see LOW_WIND_WAVE_CORRELATION_LOCATIONS above) —
+    a real, checked finding, not a caveat applied everywhere out of
+    caution.
+    """
+    if location not in LOW_WIND_WAVE_CORRELATION_LOCATIONS:
+        return None
+    return _note_box(
+        f"At {location}, wave height doesn't reliably reflect wind conditions "
+        "(historically r≈0.35-0.40 here vs. ~0.61 Sri-Lanka-wide) — check the "
+        "wind reading above even when the wave height alone looks calm.",
+    )
+
+
 def _window_note(forecast_df):
     """Calls out the calmest and roughest hour in the 48h forecast, so
     the chart above it doesn't have to be read by eye to answer 'when's
@@ -347,6 +373,7 @@ layout = html.Div(
                 ),
                 html.Div(style={"height": "8px"}),
                 html.Div(id="fisherman-conditions-grid"),
+                html.Div(id="fisherman-wind-wave-note", style={"marginTop": "16px"}),
             ],
             className=VERDICT_ZONE_CLASS,
         ),
@@ -381,6 +408,7 @@ layout = html.Div(
     Output("fisherman-gauge", "figure"),
     Output("fisherman-day-strip", "children"),
     Output("fisherman-conditions-grid", "children"),
+    Output("fisherman-wind-wave-note", "children"),
     Output("fisherman-forecast-note", "children"),
     Output("fisherman-forecast", "figure"),
     Output("fisherman-window-note", "children"),
@@ -391,7 +419,7 @@ def update_fisherman_page(location):
     if not location:
         empty_hero = _hero_left(None, None, None, "")
         placeholder = _note_box("Choose a location above to see a forecast.")
-        return empty_hero, _wave_gauge_figure(0, "#71828C"), [], None, placeholder, empty_chart(), None, empty_chart()
+        return empty_hero, _wave_gauge_figure(0, "#71828C"), [], None, None, placeholder, empty_chart(), None, empty_chart()
 
     forecast_df = get_fisherman_forecast(location)
     observed_df = get_fisherman_silver(location, days_back=7)
@@ -422,6 +450,7 @@ def update_fisherman_page(location):
         conditions_grid = _conditions_grid(None)
 
     day_strip = _day_strip(daily_df)
+    wind_wave_note = _wind_wave_note(location)
     window_note = _window_note(forecast_df)
 
     if forecast_df.empty:
@@ -491,4 +520,4 @@ def update_fisherman_page(location):
     else:
         observed_fig = empty_chart("No recent observed data for this location")
 
-    return hero, gauge_fig, day_strip, conditions_grid, note, forecast_fig, window_note, observed_fig
+    return hero, gauge_fig, day_strip, conditions_grid, wind_wave_note, note, forecast_fig, window_note, observed_fig
