@@ -31,7 +31,7 @@ import plotly.graph_objects as go
 import pandas as pd
 
 from data_access import get_analytics_data
-from page_helpers import CLASSIFICATION_COLORS, SCORE_BANDS
+from page_helpers import CLASSIFICATION_COLORS, SCORE_GOOD_MIN
 from design_system import (
     CARD, TEXT, MUTED, BORDER, NAVY,
     ACCENT_BLUE, ACCENT_ORANGE, ACCENT_TEAL, ACCENT_PINK, ACCENT_PURPLE,
@@ -41,7 +41,7 @@ from design_system import (
 
 dash.register_page(__name__, path="/analytics", name="Analytics")
 
-SUITABILITY_GOOD_MIN = SCORE_BANDS[0][0]  # 60 — kept in sync with page_helpers.py
+SUITABILITY_GOOD_MIN = SCORE_GOOD_MIN  # 60 — page_helpers.py's real "at least Good" cutoff, not positional SCORE_BANDS[0] (that's "Excellent" now that the dashboard shows all 5 HCI:Beach tiers)
 
 # Indicator -> (Gold column, display unit, chart color). Deliberately
 # sourced from Gold (daily resolution) — see get_analytics_data's

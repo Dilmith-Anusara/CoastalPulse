@@ -44,20 +44,27 @@ except ImportError:
 
 dash.register_page(__name__, path="/tourism", name="Tourism")
 
-# Score bands (0-40 Not ideal, 40-60 Fair, 60-100 Good) — used for the
-# gauge bands, the cross-location map, and as the fallback below. Matches
-# page_helpers.SCORE_BANDS: collapses HCI:Beach's published 5-tier scale
-# (Gunathilake et al. 2023) into 3 dashboard-facing bands. Kept in sync
+# Score bands — HCI:Beach's own published 5-tier scale (Gunathilake et al.
+# 2023): Impossible 0-19 / Unacceptable 20-39 / Marginal 40-59 / Good 60-79
+# / Excellent 80-100. Used for the gauge bands, the cross-location map, and
+# as the fallback below. Previously collapsed to 3 dashboard bands — that
+# didn't remove the hard cutoffs at 40/60 (those are the paper's own real
+# boundaries), it just hid that they come from a published source and lumped
+# a 60/100 day in with a 99/100 day under one "Good" label. Kept in sync
 # manually with page_helpers.py — if you change one, change both.
-SCORE_FAIR_MIN = 40
+SCORE_EXCELLENT_MIN = 80
 SCORE_GOOD_MIN = 60
+SCORE_MARGINAL_MIN = 40
+SCORE_UNACCEPTABLE_MIN = 20
 HISTORY_MIN_ROWS = 30
 CHART_WINDOW_DAYS = 30
 
 _FALLBACK_SCORE_BANDS = [
-    (SCORE_GOOD_MIN, "Good beach day", ACCENT_TEAL),
-    (SCORE_FAIR_MIN, "Fair — some conditions worth checking", ACCENT_ORANGE),
-    (0, "Not ideal today", ACCENT_PINK),
+    (SCORE_EXCELLENT_MIN, "Excellent beach day", ACCENT_TEAL),
+    (SCORE_GOOD_MIN, "Good beach day", ACCENT_GREEN),
+    (SCORE_MARGINAL_MIN, "Marginal — some conditions worth checking", ACCENT_ORANGE),
+    (SCORE_UNACCEPTABLE_MIN, "Unacceptable for most visitors", "#e67e22"),
+    (0, "Impossible — not a viable beach day", ACCENT_PINK),
 ]
 
 try:
@@ -84,9 +91,11 @@ def score_band(score):
 
 def suitability_gauge_figure(score, band_color):
     steps = [
-        {"range": [0, SCORE_FAIR_MIN], "color": "rgba(176,58,107,0.55)"},
-        {"range": [SCORE_FAIR_MIN, SCORE_GOOD_MIN], "color": "rgba(245,158,11,0.55)"},
-        {"range": [SCORE_GOOD_MIN, 100], "color": "rgba(30,138,138,0.55)"},
+        {"range": [0, SCORE_UNACCEPTABLE_MIN], "color": "rgba(176,58,107,0.55)"},
+        {"range": [SCORE_UNACCEPTABLE_MIN, SCORE_MARGINAL_MIN], "color": "rgba(230,126,34,0.55)"},
+        {"range": [SCORE_MARGINAL_MIN, SCORE_GOOD_MIN], "color": "rgba(245,158,11,0.55)"},
+        {"range": [SCORE_GOOD_MIN, SCORE_EXCELLENT_MIN], "color": "rgba(46,204,113,0.55)"},
+        {"range": [SCORE_EXCELLENT_MIN, 100], "color": "rgba(24,166,115,0.55)"},
     ]
     return stat_gauge_figure(score, 100, band_color, steps, suffix="")
 
@@ -624,7 +633,13 @@ def update_cross_location_views(selected_location):
     )
 
     map_fig = go.Figure()
-    bands = [("Good", SCORE_GOOD_MIN, 100, ACCENT_TEAL), ("Fair", SCORE_FAIR_MIN, SCORE_GOOD_MIN, ACCENT_ORANGE), ("Not ideal", 0, SCORE_FAIR_MIN, ACCENT_PINK)]
+    bands = [
+        ("Excellent", SCORE_EXCELLENT_MIN, 100, ACCENT_TEAL),
+        ("Good", SCORE_GOOD_MIN, SCORE_EXCELLENT_MIN, ACCENT_GREEN),
+        ("Marginal", SCORE_MARGINAL_MIN, SCORE_GOOD_MIN, ACCENT_ORANGE),
+        ("Unacceptable", SCORE_UNACCEPTABLE_MIN, SCORE_MARGINAL_MIN, "#e67e22"),
+        ("Impossible", 0, SCORE_UNACCEPTABLE_MIN, ACCENT_PINK),
+    ]
     for label, lo, hi, color in bands:
         group = latest[(latest["suitability_score"] >= lo) & (latest["suitability_score"] < hi + (0.01 if hi == 100 else 0))]
         lats, lons, names, hover = [], [], [], []
