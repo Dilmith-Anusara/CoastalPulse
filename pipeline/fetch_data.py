@@ -72,11 +72,26 @@ if TEST_MODE:
     LOCATIONS = [loc for loc in LOCATIONS if loc["name"] == TEST_LOCATION]
 
 # ---------------------------------------------------------------------------
-# Date range — 2025 only for now, 2024 backfill is a separate later run
+# Date range — 2025 only for now, 2024 backfill is a separate later run.
+#
+# GLOBAL_END was previously a fixed date (2026-06-30) that stopped moving
+# once written — every run after that date found every month chunk already
+# "covered" (silver_chunk_covered) and skipped it, so the pipeline kept
+# exiting successfully while silently fetching nothing new. inserted_at
+# (the freshness badge's source) kept updating on unrelated backfill/rerun
+# activity, so the badge looked fresh while the actual latest observation
+# timestamp stayed frozen at June 30 — a real gap caught by checking the
+# two against each other directly.
+#
+# Now computed fresh on every run instead. The 2-day lag matches Open-
+# Meteo's own archive-api behavior: very recent days aren't fully
+# reanalyzed yet, so requesting through "today" risks a month chunk that's
+# mostly complete but a day or two short of SKIP_COVERAGE_THRESHOLD,
+# forcing an avoidable re-fetch of the same chunk on the next run.
 # ---------------------------------------------------------------------------
 
 GLOBAL_START = date(2025, 1, 1)
-GLOBAL_END = date(2026, 6, 30)
+GLOBAL_END = date.today() - timedelta(days=2)
 
 TIMEOUT = 90
 RETRIES = 5
