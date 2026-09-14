@@ -30,10 +30,15 @@ name: Data pipeline
 # workflow, rather than needing a second workflow file.
 on:
   schedule:
-    # 20:00 UTC = 01:30 Asia/Colombo (next day) — after the day's data has
+    # 20:07 UTC = ~01:37 Asia/Colombo (next day) — after the day's data has
     # a chance to be reanalyzed, off-peak for both Open-Meteo and Supabase.
-    - cron: "0 20 * * 1-6"  # Mon-Sat: fetch + Gold + marine forecast
-    - cron: "0 20 * * 0"    # Sun: same, plus the SARIMA refit
+    # Minute deliberately NOT :00 — GitHub's own docs warn the schedule
+    # event "can be delayed during periods of high loads," and specifically
+    # call out "the start of every hour" as a high-load time (every repo's
+    # on-the-hour cron all queuing at once). A few minutes off that mark
+    # avoids competing in that spike.
+    - cron: "7 20 * * 1-6"  # Mon-Sat: fetch + Gold + marine forecast
+    - cron: "7 20 * * 0"    # Sun: same, plus the SARIMA refit
   workflow_dispatch: {}
 
 concurrency:
@@ -102,5 +107,5 @@ jobs:
       # so a manual trigger always includes this step too.
       - name: Refresh SARIMA forecasting case study (weekly)
         working-directory: pipeline
-        if: github.event.schedule == '0 20 * * 0' || github.event_name == 'workflow_dispatch'
+        if: github.event.schedule == '7 20 * * 0' || github.event_name == 'workflow_dispatch'
         run: python build_forecasts.py

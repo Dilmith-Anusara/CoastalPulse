@@ -102,7 +102,20 @@ if TEST_MODE:
 GLOBAL_START = date(2025, 1, 1)
 GLOBAL_END = date.today() - timedelta(days=5)
 
-TIMEOUT = 90
+# TIMEOUT was 90s, lowered to 30 after real GitHub Actions runs showed
+# retries (each costing a full TIMEOUT wait + RETRY_DELAY before the next
+# attempt) eating several minutes of the pipeline's timeout budget on a
+# flaky connection to Open-Meteo. Measured directly first, not guessed:
+# even a full month-chunk historical call (archive-api or marine-api,
+# 15 locations x up to 31 days x several hourly variables) returns in
+# ~1s under normal conditions — 30s still leaves ~30x headroom over that,
+# so this only cuts the wait on requests that were already stuck, not on
+# genuinely-slow-but-working ones. RETRIES is left alone (not lowered) —
+# the retries themselves are the known-necessary part (GitHub runner IPs
+# to Open-Meteo have documented transient flakiness, see fetch()'s
+# docstring/usage), only the per-attempt wait was oversized. Worst case
+# per fully-dead URL: 5 x (30 + 5) = 175s, down from 5 x (90 + 5) = 475s.
+TIMEOUT = 30
 RETRIES = 5
 RETRY_DELAY = 5
 SKIP_COVERAGE_THRESHOLD = 0.95  # tolerate up to 5% missing hours before re-fetching a chunk
