@@ -498,6 +498,10 @@ layout = html.Div(
                                 "gap": "14px",
                             },
                         ),
+                        html.Div(
+                            id="emergency-forecast-generated",
+                            style={"fontSize": "11px", "color": MUTED, "marginTop": "14px"},
+                        ),
                     ],
                     style={
                         "backgroundColor": CARD,
@@ -615,6 +619,7 @@ layout = html.Div(
     Output("emergency-observation-value", "children"),
     Output("emergency-day-strip", "children"),
     Output("emergency-forecast-strip", "children"),
+    Output("emergency-forecast-generated", "children"),
     Output("emergency-wave-chart", "figure"),
     Output("emergency-wind-pressure-chart", "figure"),
     Input("selected-location", "data"),
@@ -649,6 +654,7 @@ def update_emergency_page(location):
             "0",
             [],
             [],
+            "",
             empty_chart(),
             empty_chart(),
         )
@@ -683,6 +689,7 @@ def update_emergency_page(location):
             "0",
             [],
             [],
+            "",
             empty_chart(),
             empty_chart(),
         )
@@ -715,6 +722,7 @@ def update_emergency_page(location):
             "0",
             [],
             [],
+            "",
             empty_chart(),
             empty_chart(),
         )
@@ -837,6 +845,21 @@ def update_emergency_page(location):
             date_label = "—"
 
         forecast_cards.append(day_pill(day_label, date_label, dot_color, bg_color, row_classification))
+
+    # "Forecast generated Xh/Xd ago" — this pipeline is a daily batch job,
+    # not a live feed (same reasoning as the header's own freshness badge,
+    # see data_access.get_last_updated's docstring). Without this, a user
+    # has no way to tell whether the outlook strip reflects this morning's
+    # run or one from several days ago if the pipeline silently stalled.
+    if not forecast_df.empty and "generated_at" in forecast_df.columns and pd.notna(forecast_df["generated_at"].iloc[0]):
+        gen_age = pd.Timestamp.now("UTC") - forecast_df["generated_at"].iloc[0]
+        gen_age_text = (
+            f"{int(gen_age.total_seconds() / 3600)}h ago" if gen_age.total_seconds() < 48 * 3600
+            else f"{int(gen_age.total_seconds() / 86400)}d ago"
+        )
+        forecast_generated_text = f"Forecast generated {gen_age_text} — refreshed whenever the pipeline is re-run."
+    else:
+        forecast_generated_text = ""
 
     # ========================================================
     # WAVE CHART — last CHART_WINDOW_DAYS only (full history is used
@@ -968,6 +991,7 @@ def update_emergency_page(location):
         str(observation_count),
         day_cards,
         forecast_cards,
+        forecast_generated_text,
         wave_fig,
         wind_pressure_fig,
     )

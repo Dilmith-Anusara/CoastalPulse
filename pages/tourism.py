@@ -247,6 +247,10 @@ layout = html.Div(
                             "Open-Meteo's forecast, scored with the same HCI:Beach formula as above.",
                         ),
                         html.Div(id="tourism-forecast-strip"),
+                        html.Div(
+                            id="tourism-forecast-generated",
+                            style={"fontSize": "11px", "color": MUTED, "marginTop": "14px"},
+                        ),
                     ],
                     style=CARD_STYLE,
                 ),
@@ -337,6 +341,7 @@ layout = html.Div(
     Output("tourism-hero", "children"),
     Output("tourism-day-strip", "children"),
     Output("tourism-forecast-strip", "children"),
+    Output("tourism-forecast-generated", "children"),
     Output("tourism-condition-chips", "children"),
     Output("tourism-extra-chips", "children"),
     Output("tourism-sea-wind-chart", "figure"),
@@ -350,7 +355,7 @@ def update_tourism_page(location):
     if not location:
         return (
             html.Div("Choose a location to see beach conditions.", style={"color": "white", "fontSize": "16px"}),
-            html.Div(), [], [], [], empty_chart(), empty_chart(), empty_chart(), html.Div(),
+            html.Div(), [], "", [], [], empty_chart(), empty_chart(), empty_chart(), html.Div(),
         )
 
     try:
@@ -358,13 +363,13 @@ def update_tourism_page(location):
     except Exception:
         return (
             html.Div(f"We couldn't load data for {location} right now.", style={"color": "white", "fontSize": "16px"}),
-            html.Div(), [], [], [], empty_chart(), empty_chart(), empty_chart(), html.Div(),
+            html.Div(), [], "", [], [], empty_chart(), empty_chart(), empty_chart(), html.Div(),
         )
 
     if df is None or df.empty:
         return (
             html.Div(f"No data available for {location}.", style={"color": "white", "fontSize": "16px"}),
-            html.Div(), [], [], [], empty_chart(), empty_chart(), empty_chart(), html.Div(),
+            html.Div(), [], "", [], [], empty_chart(), empty_chart(), empty_chart(), html.Div(),
         )
 
     data = df.copy()
@@ -471,6 +476,20 @@ def update_tourism_page(location):
         date_label = row["date"].strftime("%d %b") if pd.notna(row.get("date")) else "—"
         forecast_pills.append(day_pill(day_label, date_label, row_color, f"{row_color}22", badge_text))
     forecast_strip = day_strip_grid(forecast_pills)
+
+    # "Forecast generated Xh/Xd ago" — same reasoning as Emergency's own
+    # forecast-freshness note: this is a daily batch job, not a live feed,
+    # so the outlook strip needs an honest timestamp rather than implying
+    # it's always current.
+    if not forecast_df.empty and "generated_at" in forecast_df.columns and pd.notna(forecast_df["generated_at"].iloc[0]):
+        gen_age = pd.Timestamp.now("UTC") - forecast_df["generated_at"].iloc[0]
+        gen_age_text = (
+            f"{int(gen_age.total_seconds() / 3600)}h ago" if gen_age.total_seconds() < 48 * 3600
+            else f"{int(gen_age.total_seconds() / 86400)}d ago"
+        )
+        forecast_generated_text = f"Forecast generated {gen_age_text} — refreshed whenever the pipeline is re-run."
+    else:
+        forecast_generated_text = ""
 
     # --- Condition metric cards ---
     wave_label = _wave_band(latest.get("wave_height_mean"))
@@ -593,7 +612,7 @@ def update_tourism_page(location):
     else:
         sst_fig = empty_chart("No sea temperature data for this location")
 
-    return hero, day_strip, forecast_strip, chips, extra_chips, sea_wind_fig, sun_rain_fig, sst_fig, sst_note
+    return hero, day_strip, forecast_strip, forecast_generated_text, chips, extra_chips, sea_wind_fig, sun_rain_fig, sst_fig, sst_note
 
 
 # ============================================================
