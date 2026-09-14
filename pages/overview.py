@@ -57,11 +57,7 @@ def _stat(value, label):
 
 
 # Chart-contour wave lines — echoes the tide-table aesthetic used below
-# rather than a generic decorative wave illustration. A single coral dot
-# marks a position on the chart, same motif as the brand mark in the header.
-# The dot now carries a soft low-opacity halo underneath it so it reads as
-# a deliberate "you are here" marker rather than a stray mark competing
-# with the wave-contour lines around it.
+# rather than a generic decorative wave illustration.
 _HERO_GRAPHIC = dcc.Markdown(
     """<svg viewBox="0 0 560 500" preserveAspectRatio="xMidYMid slice" style="width:100%;height:100%;">
 <path d="M0,90 C70,60 140,120 210,90 C280,60 350,120 420,90 C470,70 520,95 560,85" fill="none" stroke="#2C5457" stroke-width="1" opacity="0.55"/>
@@ -69,8 +65,6 @@ _HERO_GRAPHIC = dcc.Markdown(
 <path d="M0,250 C90,210 160,285 240,250 C310,220 380,285 450,250 C495,232 530,255 560,245" fill="none" stroke="#2C5457" stroke-width="1" opacity="0.55"/>
 <path d="M0,330 C75,295 145,360 220,330 C290,300 360,360 435,330 C480,312 525,332 560,325" fill="none" stroke="#2C5457" stroke-width="1" opacity="0.35"/>
 <path d="M0,405 C85,368 155,435 235,405 C305,378 375,435 445,405 C490,388 528,408 560,400" fill="none" stroke="#2C5457" stroke-width="1" opacity="0.5"/>
-<circle cx="330" cy="250" r="5.5" fill="#D9622A" opacity="0.18"/>
-<circle cx="330" cy="250" r="2.5" fill="#D9622A"/>
 </svg>""",
     dangerously_allow_html=True,
 )

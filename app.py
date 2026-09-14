@@ -226,14 +226,6 @@ dash_app.index_string = """
             color: var(--paper);
         }
 
-        .cp-brand-mark {
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            background: var(--coral);
-            display: inline-block;
-        }
-
 
         /* ==================================================
            NAVIGATION
@@ -869,7 +861,6 @@ navigation = html.Nav(
 
 brand = html.Div(
     [
-        html.Span(className="cp-brand-mark"),
         html.Span("CoastalPulse"),
     ],
     className="cp-brand",
