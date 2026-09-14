@@ -12,7 +12,7 @@ from data_access import (
     get_emergency_forecast,
 )
 from design_system import (
-    BG, CARD, TEXT, MUTED, BORDER, NAVY, NAVY_2, LIVE_COLOR, LIVE_BG,
+    BG, CARD, TEXT, MUTED, BORDER, NAVY, NAVY_2, LIVE_COLOR,
     ACCENT_BLUE, ACCENT_PURPLE, ACCENT_PINK, ACCENT_ORANGE, ACCENT_TEAL,
     PAGE_STYLE, HERO_STYLE, CARD_STYLE, VERDICT_ZONE_CLASS, DETAIL_ZONE_CLASS,
     section_title, metric_card, chart_card, day_pill, day_strip_grid, empty_chart,
@@ -45,7 +45,7 @@ _FALLBACK_CLASSIFICATION_COLORS = {
 
 _FALLBACK_EMERGENCY_VERDICT_TEXT = {
     "safe": "It's a good day to be near the coast. Conditions are calm.",
-    "caution": "Take some care today — the sea is a little rough near this coast.",
+    "caution": "Take some care — the sea is a little rough near this coast.",
     "dangerous": "Stay away from the coast right now. Conditions are dangerous.",
     "unknown": "We don't have a recent reading for this location.",
 }
@@ -292,7 +292,7 @@ layout = html.Div(
                             },
                         ),
                         html.Div(
-                            "See if it's safe to go near the sea today.",
+                            "See if it's currently safe to go near the sea.",
                             style={
                                 "fontSize": "13px",
                                 "color": MUTED,
@@ -301,35 +301,15 @@ layout = html.Div(
                         ),
                     ]
                 ),
-                html.Div(
-                    [
-                        html.Div(
-                            style={
-                                "width": "7px",
-                                "height": "7px",
-                                "borderRadius": "50%",
-                                "backgroundColor": LIVE_COLOR,
-                                "marginRight": "7px",
-                            }
-                        ),
-                        html.Span(
-                            "LIVE DATA",
-                            style={
-                                "fontSize": "10px",
-                                "fontWeight": "750",
-                                "letterSpacing": "0.8px",
-                                "color": LIVE_COLOR,
-                            },
-                        ),
-                    ],
-                    style={
-                        "display": "flex",
-                        "alignItems": "center",
-                        "padding": "9px 12px",
-                        "backgroundColor": LIVE_BG,
-                        "borderRadius": "20px",
-                    },
-                ),
+                # A static "LIVE DATA" pill used to sit here — removed: it
+                # was unconditional (always green, never actually checked
+                # freshness) and, worse, actively false — this pipeline is
+                # a daily batch job with a 5-day reanalysis lag on top, so
+                # "live" overclaimed by a wide margin (confirmed: the most
+                # recent real row can be ~5 days old, not near-real-time).
+                # The "Latest observation: DD Mon YYYY" text already in
+                # this hero (below) is the honest version of this same
+                # information — no need for a second, contradictory badge.
             ],
             style={
                 "display": "flex",
@@ -352,7 +332,7 @@ layout = html.Div(
                         html.Div(
                             [
                                 html.Div(
-                                    "CURRENT COASTAL STATUS",
+                                    "LATEST RECORDED COASTAL STATUS",
                                     style={
                                         "fontSize": "10px",
                                         "fontWeight": "750",
@@ -488,7 +468,7 @@ layout = html.Div(
                         section_title(
                             "Next days",
                             "Open-Meteo's forecast, classified with the same thresholds as above — so a "
-                            "Caution/Dangerous day ahead shows here even while today reads Safe.",
+                            "Caution/Dangerous day ahead shows here even while the latest recorded status reads Safe.",
                         ),
                         html.Div(
                             id="emergency-forecast-strip",

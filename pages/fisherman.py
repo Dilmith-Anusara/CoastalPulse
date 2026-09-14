@@ -95,7 +95,7 @@ LOW_WIND_WAVE_CORRELATION_LOCATIONS = {"Trincomalee", "Batticaloa", "Arugam Bay"
 # colors (CLASSIFICATION_COLORS, shared via page_helpers.py).
 _FISHERMAN_VERDICT_TEXT = {
     "Safe": "Good conditions to head out.",
-    "Caution": "Rough seas today — experienced crews only, and stay within sight of shore.",
+    "Caution": "Rough seas right now — experienced crews only, and stay within sight of shore.",
     "Dangerous": "Not safe to go out — stay in port until conditions ease.",
     None: "Not enough recent data for this location to advise.",
 }
@@ -183,7 +183,7 @@ def _hero_left(classification, wave_value, observed_time, history_note):
     return html.Div(
         [
             html.Div(
-                "CURRENT FISHING CONDITIONS",
+                "LATEST RECORDED FISHING CONDITIONS",
                 style={
                     "fontSize": "10px", "fontWeight": "750", "letterSpacing": "1.4px",
                     "color": "#8EA6B0", "marginBottom": "20px",

@@ -89,9 +89,9 @@ hero = html.Div(
                 ),
                 html.Div(
                     [
-                        _stat(html.Span("—", id="overview-stat-safe-value"), "Locations safe today"),
+                        _stat(html.Span("—", id="overview-stat-safe-value"), "Locations currently Safe"),
                         _stat(html.Span("—", id="overview-stat-caution-value"), "Under caution or warning"),
-                        _stat(html.Span("—", id="overview-stat-best-value"), html.Span("Best beach score today", id="overview-stat-best-label")),
+                        _stat(html.Span("—", id="overview-stat-best-value"), html.Span("Best beach score right now", id="overview-stat-best-label")),
                     ],
                     className="cp-stat-strip",
                 ),
@@ -130,7 +130,7 @@ highlight_banner = html.Div(
 map_section = html.Div(
     [
         html.Div("Sri Lanka right now", className="cp-section-title"),
-        html.Div("Every monitored location, colored by today's coastal risk.", className="cp-section-sub"),
+        html.Div("Every monitored location, colored by current coastal risk.", className="cp-section-sub"),
         html.Div(
             dcc.Graph(id="overview-map", config={"displayModeBar": False, "responsive": True}, style={"height": "420px"}),
             className="cp-card",
@@ -196,21 +196,21 @@ def _build_overview_map(latest_em):
 
 def _build_highlight(safe, caution, dangerous, total, best_name, best_score):
     if not total:
-        return "Live status is temporarily unavailable."
+        return "Status is temporarily unavailable."
 
     if dangerous > 0:
         risk_text = (
             f"{dangerous} location{'s' if dangerous != 1 else ''} "
-            f"{'are' if dangerous != 1 else 'is'} at Dangerous risk today — "
+            f"{'are' if dangerous != 1 else 'is'} currently at Dangerous risk — "
             "check Emergency mode before heading to the coast there."
         )
     elif caution > 0:
-        risk_text = f"Conditions are calm at most locations, but {caution} {'are' if caution != 1 else 'is'} under Caution today."
+        risk_text = f"Conditions are calm at most locations, but {caution} {'are' if caution != 1 else 'is'} currently under Caution."
     else:
-        risk_text = f"All {total} monitored locations are Safe today."
+        risk_text = f"All {total} monitored locations are currently Safe."
 
     if best_name and best_score is not None and pd.notna(best_score):
-        beach_text = f" {best_name} has today's best beach conditions, scoring {best_score:.0f}/100."
+        beach_text = f" {best_name} currently has the best beach conditions, scoring {best_score:.0f}/100."
     else:
         beach_text = ""
 
@@ -289,7 +289,7 @@ nav_section = html.Div(
                 ),
                 _audience_row(
                     "Tourism", "Visiting the beach",
-                    "Beach conditions and whether today is a good day to go.",
+                    "Beach conditions and whether it's currently a good day to go.",
                     "/tourism", "overview-mode-stat-tourism",
                 ),
                 _audience_row(
@@ -427,19 +427,19 @@ def update_overview_live(pathname):
     safe_text = f"{safe_count}/{total_count}" if total_count else "—"
     caution_text = str(caution_count + dangerous_count) if total_count else "—"
     best_value_text = f"{best_score:.0f}" if best_score is not None and pd.notna(best_score) else "—"
-    best_label_text = f"Best beach score today — {best_name}" if best_name else "Best beach score today"
+    best_label_text = f"Best beach score right now — {best_name}" if best_name else "Best beach score right now"
 
     highlight = _build_highlight(safe_count, caution_count, dangerous_count, total_count, best_name, best_score)
     map_fig = _build_overview_map(latest_em)
 
-    # --- Mode-picker live stats — one honest, real-data line per row,
-    # instead of pure static marketing copy. ---------------------------
+    # --- Mode-picker stats — one honest, real-data line per row, instead
+    # of pure static marketing copy. -------------------------------------
     mode_stat_emergency = (
-        f"{safe_count}/{total_count} locations Safe today" if total_count else "Live status unavailable"
+        f"{safe_count}/{total_count} locations currently Safe" if total_count else "Status unavailable"
     )
 
     mode_stat_tourism = (
-        f"Best today: {best_name} — {best_score:.0f}/100" if best_name else "Live suitability scores, 15 locations"
+        f"Best now: {best_name} — {best_score:.0f}/100" if best_name else "Current suitability scores, 15 locations"
     )
 
     mode_stat_fisherman = "48h forecasts not generated yet"
@@ -497,9 +497,9 @@ def _snapshot_row(mode, location, value_text, value, status_text, status_color, 
 )
 def update_overview_snapshot(location):
     if not location:
-        return "Today's readings", "", []
+        return "Latest readings", "", []
 
-    title = f"Today's readings — {location}"
+    title = f"Latest readings — {location}"
     scope = "updated daily"
     rows = []
 
@@ -527,7 +527,7 @@ def update_overview_snapshot(location):
         # row shows a status badge same as Emergency/Fisherman below instead
         # of leaving that slot blank; meta_text holds a short description
         # rather than repeating the same label a second time in the row.
-        meta_text = "HCI:Beach suitability score for today's daylight hours."
+        meta_text = "HCI:Beach suitability score for the most recent recorded daylight hours."
         rows.append(_snapshot_row("Tourism", location, value_text, score, label, color, meta_text, "/tourism"))
     else:
         rows.append(_snapshot_row("Tourism", location, "—", None, None, None, "No data yet for this location.", "/tourism"))

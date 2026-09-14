@@ -286,7 +286,7 @@ layout = html.Div(
 
                 section_title(
                     "Surf detail",
-                    "Swell and wave period — latest available hourly readings for today, computed the same daylight-hours-mean way as everything above.",
+                    "Swell and wave period — latest available hourly readings, computed the same daylight-hours-mean way as everything above.",
                 ),
                 html.Div(
                     [],
@@ -323,7 +323,7 @@ layout = html.Div(
                 html.Div(style={"height": "24px"}),
 
                 chart_card("Ranked comparison — all locations, latest day",
-                           "This location's suitability score against every other location today.",
+                           "This location's suitability score against every other location right now.",
                            "tourism-ranked-comparison", height=360),
             ],
             className=DETAIL_ZONE_CLASS,
@@ -401,7 +401,7 @@ def update_tourism_page(location):
             html.Div(
                 [
                     html.Div(
-                        "CURRENT BEACH CONDITIONS",
+                        "LATEST RECORDED BEACH CONDITIONS",
                         style={"fontSize": "10px", "fontWeight": "750", "letterSpacing": "1.4px", "color": "#8EA6B0", "marginBottom": "20px"},
                     ),
                     html.Div(
@@ -639,14 +639,14 @@ def _best_pick_note(latest, selected_location):
     own_score = own_row.iloc[0].get("suitability_score") if not own_row.empty else None
 
     if selected_location and top_name == selected_location:
-        text = f"You're already at today's top-rated location for a beach day — {top_name} leads all 15 with a score of {top_score:.0f}/100."
+        text = f"You're already at the top-rated location for a beach day right now — {top_name} leads all 15 with a score of {top_score:.0f}/100."
     elif pd.notna(own_score):
         text = (
-            f"Today's best pick across all 15 locations is {top_name} (score {top_score:.0f}/100). "
-            f"{selected_location} scores {own_score:.0f}/100 today."
+            f"The best pick across all 15 locations right now is {top_name} (score {top_score:.0f}/100). "
+            f"{selected_location} currently scores {own_score:.0f}/100."
         )
     else:
-        text = f"Today's best pick across all 15 locations is {top_name} (score {top_score:.0f}/100)."
+        text = f"The best pick across all 15 locations right now is {top_name} (score {top_score:.0f}/100)."
 
     return html.Div(
         text,
