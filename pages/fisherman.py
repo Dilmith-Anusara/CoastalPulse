@@ -1,14 +1,23 @@
 """
 pages/fisherman.py — Fisherman mode.
 
-Real forecast, no longer mocked: get_fisherman_forecast() (data_access.py)
-now reads the `forecasts` table written by pipeline/build_forecasts.py — a
-SARIMA model fit per location directly on silver_hourly's wave_height
-series. See that script's docstring for the model order, why it isn't fit
-inside this app, and the per-location backtest_rmse this page displays.
+UPDATED: forecast source switched from our own per-location SARIMA fit to
+Open-Meteo's live Marine/Forecast API (get_marine_forecast(), reading the
+`marine_forecasts` table written by pipeline/fetch_marine_forecast.py) — a
+real physics-based operational forecast (ECMWF WAM, NOAA GFS Wave,
+MeteoFrance MFWAM, DWD EWAM/GWAM, blended by Open-Meteo), up to 8 days
+ahead instead of SARIMA's 48h, and aware of approaching weather systems
+SARIMA's pure autoregression on one location's own past wave heights never
+was. SARIMA didn't stop being useful — it moved to the Analytics page as a
+forecasting case study (the actual modeling-skill demonstration), see
+pipeline/build_forecasts.py's docstring.
+
+Unlike SARIMA's output, Open-Meteo's forecast doesn't carry a confidence
+interval or a backtest_rmse we measured ourselves — this page attributes
+the source honestly instead of implying an error margin we don't have.
 
 If the pipeline hasn't been run yet for the selected location (or ever),
-get_fisherman_forecast() returns an empty DataFrame — this page says so
+get_marine_forecast() returns an empty DataFrame — this page says so
 explicitly rather than showing an empty chart with no explanation.
 
 LAYOUT — now matches Emergency/Tourism's structure exactly, which this
@@ -45,11 +54,11 @@ from dash import html, dcc, callback, Input, Output
 import plotly.graph_objects as go
 import pandas as pd
 
-from data_access import get_fisherman_forecast, get_fisherman_silver, get_emergency_data
+from data_access import get_marine_forecast, get_fisherman_silver, get_emergency_data
 from design_system import (
     PAGE_STYLE, TEXT, MUTED, CARD_STYLE, HERO_STYLE,
     VERDICT_ZONE_CLASS, DETAIL_ZONE_CLASS,
-    ACCENT_BLUE, ACCENT_PURPLE, ACCENT_ORANGE, ACCENT_GREEN,
+    ACCENT_BLUE, ACCENT_PURPLE, ACCENT_ORANGE, ACCENT_GREEN, ACCENT_TEAL,
     section_title, metric_card, chart_card, day_pill, day_strip_grid,
     empty_chart, stat_gauge_figure,
 )
@@ -300,38 +309,50 @@ def _wind_wave_note(location):
 
 
 def _window_note(forecast_df):
-    """Calls out the calmest and roughest hour in the 48h forecast, so
+    """Calls out the calmest and roughest hour across the whole forecast
+    horizon (now up to 8 days, from Open-Meteo — was 48h under SARIMA), so
     the chart above it doesn't have to be read by eye to answer 'when's
-    the best time to go out in the next couple of days'.
+    the best time to go out'.
     """
     if forecast_df.empty:
         return None
 
-    best = forecast_df.loc[forecast_df["wave_height_forecast"].idxmin()]
-    worst = forecast_df.loc[forecast_df["wave_height_forecast"].idxmax()]
+    best = forecast_df.loc[forecast_df["wave_height"].idxmin()]
+    worst = forecast_df.loc[forecast_df["wave_height"].idxmax()]
+    days = max(1, round(len(forecast_df) / 24))
 
     def _stat(label, row, color):
         return html.Div(
             [
                 html.Div(label, style={"fontSize": "11px", "fontWeight": "700", "color": color, "letterSpacing": "0.4px", "marginBottom": "6px"}),
                 html.Div(
-                    row["forecast_time"].strftime("%a %I %p"),
+                    row["forecast_time"].strftime("%a %d %b, %I %p"),
                     style={"fontSize": "16px", "fontWeight": "750", "color": TEXT},
                 ),
-                html.Div(f"~{row['wave_height_forecast']:.1f} m", style={"fontSize": "12px", "color": MUTED, "marginTop": "2px"}),
+                html.Div(f"~{row['wave_height']:.1f} m", style={"fontSize": "12px", "color": MUTED, "marginTop": "2px"}),
             ],
             style={"flex": "1", "minWidth": "140px"},
         )
 
     return html.Div(
         [
-            section_title("Next 48 hours", "Calmest and roughest stretches in the forecast, from the same SARIMA model."),
+            section_title(f"Next {days} days", "Calmest and roughest stretches in Open-Meteo's forecast for this location."),
             html.Div(
                 [_stat("CALMEST", best, ACCENT_GREEN), _stat("ROUGHEST", worst, ACCENT_ORANGE)],
                 style={"display": "flex", "gap": "24px", "flexWrap": "wrap"},
             ),
         ],
         style=CARD_STYLE,
+    )
+
+
+def _swell_breakdown_note():
+    return _note_box(
+        "Primary swell is usually the dominant driver of surfable wave energy; wind waves are locally "
+        "wind-driven and choppier at short range; secondary swell (when the model resolves one) is a "
+        "second wave train arriving from a different, more distant storm system. All three combine into "
+        "the single wave-height number above.",
+        color=ACCENT_TEAL, bg="#EAF7F5",
     )
 
 
@@ -391,12 +412,20 @@ layout = html.Div(
             [
                 html.Div(id="fisherman-forecast-note", style={"marginBottom": "20px"}),
                 chart_card(
-                    "48-hour wave height forecast",
-                    "SARIMA model fit on this location's own hourly history — shaded band is the model's 95% prediction interval, not a guarantee.",
+                    "Wave height forecast",
+                    "Open-Meteo's operational wave-model forecast for this location — not a model we fit ourselves.",
                     "fisherman-forecast", height=380,
                 ),
                 html.Div(style={"height": "20px"}),
                 html.Div(id="fisherman-window-note"),
+                html.Div(style={"height": "24px"}),
+                chart_card(
+                    "Swell & wind-wave breakdown",
+                    "What's actually making up the wave-height number above — primary swell, secondary swell (when the model resolves one), and locally wind-driven waves.",
+                    "fisherman-swell-breakdown", height=360,
+                ),
+                html.Div(style={"height": "12px"}),
+                _swell_breakdown_note(),
                 html.Div(style={"height": "24px"}),
                 chart_card(
                     "Recent observed conditions",
@@ -421,6 +450,7 @@ layout = html.Div(
     Output("fisherman-forecast-note", "children"),
     Output("fisherman-forecast", "figure"),
     Output("fisherman-window-note", "children"),
+    Output("fisherman-swell-breakdown", "figure"),
     Output("fisherman-recent-observed", "figure"),
     Input("selected-location", "data"),
 )
@@ -428,9 +458,9 @@ def update_fisherman_page(location):
     if not location:
         empty_hero = _hero_left(None, None, None, "")
         placeholder = _note_box("Choose a location above to see a forecast.")
-        return empty_hero, _wave_gauge_figure(0, "#71828C"), [], None, None, placeholder, empty_chart(), None, empty_chart()
+        return empty_hero, _wave_gauge_figure(0, "#71828C"), [], None, None, placeholder, empty_chart(), None, empty_chart(), empty_chart()
 
-    forecast_df = get_fisherman_forecast(location)
+    forecast_df = get_marine_forecast(location)
     observed_df = get_fisherman_silver(location, days_back=7)
     daily_df = get_emergency_data(location)
 
@@ -464,23 +494,18 @@ def update_fisherman_page(location):
 
     if forecast_df.empty:
         note = _note_box(
-            f"No forecast available for {location} yet — the forecasting pipeline "
-            "(pipeline/build_forecasts.py) hasn't been run for this location, or it "
-            "didn't have enough history to fit a model. This is a data-availability "
-            "gap, not a broken chart.",
+            f"No forecast available for {location} yet — the forecast pipeline "
+            "(pipeline/fetch_marine_forecast.py) hasn't been run for this location. "
+            "This is a data-availability gap, not a broken chart.",
         )
     else:
-        rmse = forecast_df["backtest_rmse"].iloc[0]
         generated = forecast_df["generated_at"].iloc[0]
         age = pd.Timestamp.now("UTC") - generated
         age_text = f"{int(age.total_seconds() / 3600)}h ago" if age.total_seconds() < 48 * 3600 else f"{int(age.total_seconds() / 86400)}d ago"
-        rmse_text = (
-            f"Typical model error on recent held-out data: ±{rmse:.2f} m. "
-            if pd.notna(rmse) else ""
-        )
         note = _note_box(
-            f"{rmse_text}Forecast generated {age_text} — refreshed whenever the forecasting "
-            "pipeline is re-run, not on every page load.",
+            "Source: Open-Meteo Marine Weather Forecast — a blend of operational ocean/wave models "
+            "(ECMWF WAM, NOAA GFS Wave, MeteoFrance MFWAM, DWD EWAM/GWAM), not a model we fit ourselves. "
+            f"Forecast generated {age_text} — refreshed whenever the pipeline is re-run, not on every page load.",
             color=ACCENT_BLUE, bg="#EAF2FB",
         )
 
@@ -490,23 +515,46 @@ def update_fisherman_page(location):
         forecast_fig = go.Figure()
         forecast_fig.add_trace(
             go.Scatter(
-                x=pd.concat([forecast_df["forecast_time"], forecast_df["forecast_time"][::-1]]),
-                y=pd.concat([forecast_df["ci_high"], forecast_df["ci_low"][::-1]]),
-                fill="toself", fillcolor="rgba(59,110,140,0.15)",
-                line=dict(color="rgba(0,0,0,0)"), hoverinfo="skip",
-                name="95% interval", showlegend=True,
-            )
-        )
-        forecast_fig.add_trace(
-            go.Scatter(
-                x=forecast_df["forecast_time"], y=forecast_df["wave_height_forecast"],
-                mode="lines+markers", name="Forecast wave height (m)",
-                line=dict(color=ACCENT_BLUE, width=3), marker=dict(size=5, color=ACCENT_BLUE),
+                x=forecast_df["forecast_time"], y=forecast_df["wave_height"],
+                mode="lines", name="Forecast wave height (m)",
+                line=dict(color=ACCENT_BLUE, width=3),
             )
         )
         forecast_fig.update_layout(
             margin=dict(l=50, r=20, t=10, b=45),
             yaxis_title="Wave height (m)",
+            legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="right", x=1),
+        )
+
+    if forecast_df.empty:
+        swell_fig = empty_chart("No forecast available for this location yet")
+    else:
+        swell_fig = go.Figure()
+        swell_fig.add_trace(
+            go.Scatter(
+                x=forecast_df["forecast_time"], y=forecast_df["swell_height"],
+                mode="lines", name="Primary swell (m)",
+                line=dict(color=ACCENT_BLUE, width=2.5),
+            )
+        )
+        if forecast_df["secondary_swell_height"].notna().any():
+            swell_fig.add_trace(
+                go.Scatter(
+                    x=forecast_df["forecast_time"], y=forecast_df["secondary_swell_height"],
+                    mode="lines", name="Secondary swell (m)",
+                    line=dict(color=ACCENT_PURPLE, width=2, dash="dot"),
+                )
+            )
+        swell_fig.add_trace(
+            go.Scatter(
+                x=forecast_df["forecast_time"], y=forecast_df["wind_wave_height"],
+                mode="lines", name="Wind waves (m)",
+                line=dict(color=ACCENT_ORANGE, width=2),
+            )
+        )
+        swell_fig.update_layout(
+            margin=dict(l=50, r=20, t=10, b=45),
+            yaxis_title="Height (m)",
             legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="right", x=1),
         )
 
@@ -529,4 +577,4 @@ def update_fisherman_page(location):
     else:
         observed_fig = empty_chart("No recent observed data for this location")
 
-    return hero, gauge_fig, day_strip, conditions_grid, wind_wave_note, note, forecast_fig, window_note, observed_fig
+    return hero, gauge_fig, day_strip, conditions_grid, wind_wave_note, note, forecast_fig, window_note, swell_fig, observed_fig

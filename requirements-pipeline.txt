@@ -1,5 +1,6 @@
 # Dependencies for the GitHub Actions pipeline job (pipeline/fetch_data.py,
-# build_gold.py, build_forecasts.py) — kept separate from requirements.txt
+# build_gold.py, build_forecasts.py, fetch_marine_forecast.py) — kept
+# separate from requirements.txt
 # (the dashboard's own deps) so Vercel's serverless function never has to
 # install statsmodels/scipy, which the dashboard itself never imports.
 # Shared versions kept in sync with requirements.txt on purpose.

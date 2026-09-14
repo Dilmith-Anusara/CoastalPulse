@@ -1,20 +1,39 @@
 name: Data pipeline
 
-# Runs fetch_data.py -> build_gold.py -> build_forecasts.py, in that order,
-# once a day. Order matters: build_gold.py aggregates whatever's currently
-# in silver_hourly, and build_forecasts.py refits SARIMA on silver_hourly
-# too, so both need to run AFTER the fetch, not on a separate schedule.
+# Runs fetch_data.py -> build_gold.py -> fetch_marine_forecast.py every day,
+# plus build_forecasts.py (SARIMA) on Sundays only — see the cadence note
+# below. Order matters for fetch_data.py -> build_gold.py: Gold aggregates
+# whatever's currently in silver_hourly, so it must run AFTER the fetch.
+# fetch_marine_forecast.py and build_forecasts.py are both independent of
+# each other and of build_gold.py (neither reads Gold), so their relative
+# order doesn't matter for correctness — fetch_marine_forecast.py runs
+# first anyway so Fisherman's live forecast (the one a user actually acts
+# on) lands even if the slower SARIMA step hangs or fails on a Sunday run.
 #
-# Daily is the right cadence, not more: archive-api/marine-api's own
-# reanalysis data (ERA5/ERA5-Land, ERA5-Ocean) lags 5 days behind real
-# time regardless of how often we ask, so running this more than once a
-# day wouldn't get any data any fresher — see fetch_data.py's GLOBAL_END
-# comment for the sources.
+# Daily is the right cadence for fetch/Gold/marine-forecast, not more:
+# archive-api/marine-api's own reanalysis data (ERA5/ERA5-Land, ERA5-Ocean)
+# lags 5 days behind real time regardless of how often we ask, so running
+# this more than once a day wouldn't get any data any fresher — see
+# fetch_data.py's GLOBAL_END comment for the sources.
+#
+# build_forecasts.py (SARIMA) is now WEEKLY, not daily — measured at
+# 37m39s on its own (reads/refits on full silver_hourly history every run,
+# so this doesn't shrink as the catch-up backlog clears), by far the
+# single biggest cost in this workflow. That cost bought its keep when its
+# output fed Fisherman's live forecast; now that it only feeds the
+# Analytics page's forecasting case study (see pipeline/build_forecasts.py
+# and pages/analytics.py), there's no user-facing reason to refit it every
+# single day — a case-study model demonstrating methodology doesn't go
+# stale in 24h the way a live forecast would. Two schedule triggers below
+# (Mon-Sat vs. Sun) plus a per-step `if` on github.event.schedule is the
+# standard way to run most steps daily and one step weekly inside a single
+# workflow, rather than needing a second workflow file.
 on:
   schedule:
     # 20:00 UTC = 01:30 Asia/Colombo (next day) — after the day's data has
     # a chance to be reanalyzed, off-peak for both Open-Meteo and Supabase.
-    - cron: "0 20 * * *"
+    - cron: "0 20 * * 1-6"  # Mon-Sat: fetch + Gold + marine forecast
+    - cron: "0 20 * * 0"    # Sun: same, plus the SARIMA refit
   workflow_dispatch: {}
 
 concurrency:
@@ -27,14 +46,17 @@ permissions:
 jobs:
   run-pipeline:
     runs-on: ubuntu-latest
-    # 45min wasn't enough for the initial catch-up run: Open-Meteo reads
-    # from GitHub's runner IPs were consistently needing a retry (each
-    # costing a wasted 90s timeout + 5s delay) across ~225 API calls, since
-    # 3 months of backlog needed fetching at once. Routine daily runs need
-    # far fewer calls (~1 current-month chunk instead of 3) so should
-    # finish well under this — 60 is headroom for a bad-network day, not
-    # the expected runtime.
-    timeout-minutes: 60
+    # Raised from 60 -> 90 after adding fetch_marine_forecast.py. A normal
+    # Sunday run (the only day SARIMA also runs) tallies to roughly:
+    # build_gold.py ~7min (measured) + build_forecasts.py ~38min (measured)
+    # + fetch_marine_forecast.py ~1-3min (measured ~45s locally, CI network
+    # adds some) + fetch_data.py (a few more minutes on a normal 1-month-
+    # chunk day) — landing close enough to the old 60min ceiling to leave
+    # almost no room for a bad-network day, which is exactly the scenario
+    # this timeout exists to cover. Raising it costs nothing extra (Actions
+    # bills actual runtime, not the ceiling) — plain insurance, not an
+    # expected runtime.
+    timeout-minutes: 90
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -70,6 +92,15 @@ jobs:
         working-directory: pipeline
         run: python build_gold.py
 
-      - name: Refresh 48h forecasts
+      - name: Refresh Fisherman forecast (Open-Meteo)
         working-directory: pipeline
+        run: python fetch_marine_forecast.py
+
+      # Weekly only (Sunday's cron, or any manual run) — see the cadence
+      # note at the top of this file for why. github.event.schedule is only
+      # set for scheduled runs, hence the separate workflow_dispatch check
+      # so a manual trigger always includes this step too.
+      - name: Refresh SARIMA forecasting case study (weekly)
+        working-directory: pipeline
+        if: github.event.schedule == '0 20 * * 0' || github.event_name == 'workflow_dispatch'
         run: python build_forecasts.py

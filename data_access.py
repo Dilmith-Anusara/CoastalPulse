@@ -359,18 +359,24 @@ def get_fisherman_forecast(location: str | None = None) -> pd.DataFrame:
     written by pipeline/build_forecasts.py (a per-location SARIMA model
     fit directly on silver_hourly — see that script's docstring for the
     model order, validation, and why it isn't fit inside this app). Each
-    row also carries `backtest_rmse` — the model's real held-out accuracy
-    for this location the last time the pipeline ran — so the UI can show
-    an honest error margin instead of implying the forecast is exact.
+    row also carries `backtest_rmse` and `naive_rmse` — the model's real
+    held-out accuracy for this location vs. a naive persistence baseline,
+    the last time the pipeline ran.
+
+    Kept under its original name even though pages/fisherman.py no longer
+    calls it (that page now reads get_marine_forecast() — Open-Meteo's own
+    live forecast — instead). Still used by Overview's Sri-Lanka-wide
+    mode-picker stat, and now by Analytics' forecasting case study, which
+    presents this same SARIMA output (model spec, backtest RMSE vs. naive)
+    as the modeling-skill demonstration it was always meant to be, rather
+    than as a live forecast a user would plan a trip around.
 
     location=None returns all 15 locations (~720 rows total, well under
     PostgREST's 1000-row cap, but routed through _fetch_all_rows anyway —
     same reasoning as get_emergency_data/get_tourism_data: a table that's
     small today isn't a promise it stays that way, and the compound
     ["forecast_time", "location_name"] order avoids the tie-ordering bug
-    _fetch_all_rows's own docstring describes). Used by Overview's
-    Sri-Lanka-wide mode-picker stat, not by Fisherman mode itself (which
-    always passes a single location).
+    _fetch_all_rows's own docstring describes).
 
     Returns an empty DataFrame (not mock data) if the pipeline hasn't been
     run yet for this location — the UI is responsible for saying so.
@@ -378,6 +384,34 @@ def get_fisherman_forecast(location: str | None = None) -> pd.DataFrame:
     _validate_location(location)
     eq = ("location_name", location) if location else None
     rows = _fetch_all_rows("forecasts", order=["forecast_time", "location_name"], eq=eq)
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df["forecast_time"] = pd.to_datetime(df["forecast_time"])
+        df["generated_at"] = pd.to_datetime(df["generated_at"])
+    return df
+
+
+@cache_stub
+def get_marine_forecast(location: str | None = None) -> pd.DataFrame:
+    """
+    Pulls the 8-day-ahead wave/swell/wind forecast from the
+    `marine_forecasts` table, written by pipeline/fetch_marine_forecast.py —
+    Open-Meteo's own live forecast (real physics-based ocean/wave models,
+    not a model we fit ourselves). This is what pages/fisherman.py now
+    reads; get_fisherman_forecast() (the SARIMA `forecasts` table) has
+    moved to feeding the Analytics page's forecasting case study instead.
+
+    Unlike SARIMA's output, there's no backtest_rmse / confidence interval
+    here — it's a third-party forecast, not a model we validated ourselves,
+    so the UI should attribute the source rather than imply an error margin
+    we didn't measure.
+
+    location=None returns all 15 locations. Returns an empty DataFrame (not
+    mock data) if the pipeline hasn't been run yet for this location.
+    """
+    _validate_location(location)
+    eq = ("location_name", location) if location else None
+    rows = _fetch_all_rows("marine_forecasts", order=["forecast_time", "location_name"], eq=eq)
     df = pd.DataFrame(rows)
     if not df.empty:
         df["forecast_time"] = pd.to_datetime(df["forecast_time"])

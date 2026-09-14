@@ -1,13 +1,25 @@
 """
-build_forecasts.py — CoastalPulse Fisherman forecasting.
+build_forecasts.py — CoastalPulse forecasting case study (SARIMA).
 
-Reads silver_hourly directly (no Gold table for Fisherman — the raw hourly
+UPDATED: this table no longer feeds pages/fisherman.py — that page now
+reads pipeline/fetch_marine_forecast.py's `marine_forecasts` table
+(Open-Meteo's own live forecast, a materially better operational forecast
+than this per-location univariate model). This script keeps running
+unchanged, refitting daily, because its real value was always the modeling
+exercise itself (ACF/PACF diagnostics, stationarity tests, region-level
+grid search, honest backtest RMSE vs. a naive baseline — see
+validation_scripts/eda_weather_indicators.ipynb Section 8-9) — now
+presented on the Analytics page (data_access.py's get_fisherman_forecast,
+kept under its original name since Overview's mode-picker stat still reads
+it too) as a forecasting case study rather than as Fisherman's live
+forecast.
+
+Reads silver_hourly directly (no Gold table for this — the raw hourly
 wave_height series IS the model input, there's nothing to pre-aggregate),
 fits a SARIMA model per location, and writes a 48-hour-ahead wave_height
-forecast to a new `forecasts` table. The dashboard (data_access.py's
-get_fisherman_forecast) only ever reads that table — it never fits a model
-itself, the same "batch job writes, dashboard just reads" split as
-fetch_data.py -> silver_hourly and build_gold.py -> gold_*.
+forecast to the `forecasts` table. The same "batch job writes, dashboard
+just reads" split as fetch_data.py -> silver_hourly and build_gold.py ->
+gold_*.
 
 MODEL CHOICE (revised) — d=0, D=1, seasonal period m=24, (p,q) and (P,Q)
 searched per COASTAL REGION:
@@ -121,6 +133,12 @@ def ensure_forecasts_table(conn):
         );
         """
     )
+    # Added after the initial run — backtest_rmse() already computed a naive
+    # persistence-baseline RMSE alongside SARIMA's, it just wasn't persisted.
+    # Needed now that this table's consumer is the Analytics case study
+    # (pages/analytics.py), which shows SARIMA against that baseline rather
+    # than an unqualified error number.
+    cur.execute("ALTER TABLE forecasts ADD COLUMN IF NOT EXISTS naive_rmse NUMERIC;")
     conn.commit()
     cur.close()
     cur = conn.cursor()
@@ -230,6 +248,7 @@ def build_forecast_df(location_name: str, series: pd.Series, order: tuple, seaso
 
     bt = backtest_rmse(series, order, seasonal_order)
     sarima_rmse = bt[0] if bt else None
+    naive_rmse = bt[1] if bt else None
 
     # Refit on the FULL series (not the backtest's truncated train split) —
     # the live forecast should use every hour of history available.
@@ -257,6 +276,7 @@ def build_forecast_df(location_name: str, series: pd.Series, order: tuple, seaso
                 "ci_high": max(0.0, float(conf.iloc[i, 1])),
                 "model_type": model_label,
                 "backtest_rmse": sarima_rmse,
+                "naive_rmse": naive_rmse,
             }
         )
     return pd.DataFrame(rows)
@@ -277,20 +297,22 @@ def upsert_forecasts(conn, location_name: str, df: pd.DataFrame):
             """
             INSERT INTO forecasts
                 (location_name, forecast_time, generated_at, wave_height_forecast,
-                 ci_low, ci_high, model_type, backtest_rmse)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                 ci_low, ci_high, model_type, backtest_rmse, naive_rmse)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (location_name, forecast_time) DO UPDATE SET
                 generated_at = EXCLUDED.generated_at,
                 wave_height_forecast = EXCLUDED.wave_height_forecast,
                 ci_low = EXCLUDED.ci_low,
                 ci_high = EXCLUDED.ci_high,
                 model_type = EXCLUDED.model_type,
-                backtest_rmse = EXCLUDED.backtest_rmse;
+                backtest_rmse = EXCLUDED.backtest_rmse,
+                naive_rmse = EXCLUDED.naive_rmse;
             """,
             (
                 r["location_name"], r["forecast_time"], r["generated_at"],
                 clean_value(r["wave_height_forecast"]), clean_value(r["ci_low"]),
                 clean_value(r["ci_high"]), r["model_type"], clean_value(r["backtest_rmse"]),
+                clean_value(r["naive_rmse"]),
             ),
         )
     conn.commit()

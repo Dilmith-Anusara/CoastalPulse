@@ -30,7 +30,7 @@ from dash import html, dcc, callback, Input, Output
 import plotly.graph_objects as go
 import pandas as pd
 
-from data_access import get_analytics_data
+from data_access import get_analytics_data, get_fisherman_forecast
 from page_helpers import CLASSIFICATION_COLORS, SCORE_GOOD_MIN
 from design_system import (
     CARD, TEXT, MUTED, BORDER, NAVY,
@@ -209,6 +209,32 @@ layout = html.Div(
                 ),
                 dcc.Graph(id="analytics-correlation-chart", config={"displayModeBar": False}, style={"height": "480px"}),
                 html.Div(id="analytics-correlation-caption"),
+            ],
+            style=CARD_STYLE,
+        ),
+        html.Div(style={"height": "24px"}),
+
+        html.Div(
+            [
+                section_title(
+                    "Forecasting case study: SARIMA wave-height model",
+                    "A per-location SARIMA model, refit daily on this location's own hourly wave-height history — "
+                    "the forecasting-skill demonstration for this project. It used to power Fisherman's live "
+                    "forecast; that page now reads Open-Meteo's own physics-based operational forecast instead "
+                    "(materially better for a real go/no-go decision — see pipeline/fetch_marine_forecast.py), so "
+                    "this model's real value is shown here: does it actually beat a naive baseline, and where "
+                    "does it fall short.",
+                ),
+                dcc.Graph(id="analytics-forecast-rmse-chart", config={"displayModeBar": False}, style={"height": "340px"}),
+                html.Div(id="analytics-forecast-caption"),
+                _caption_box(
+                    "Limitations, by design: univariate (wave height only — no wind, pressure, or storm "
+                    "awareness), (p,q)/(P,Q) order selected per coastal region rather than per individual "
+                    "location, and only ever forecasts 48 hours ahead. Open-Meteo's operational models are "
+                    "multivariate and physics-based, which is why Fisherman now uses that source instead of "
+                    "this one for its live forecast.",
+                    color=ACCENT_ORANGE,
+                ),
             ],
             style=CARD_STYLE,
         ),
@@ -398,3 +424,80 @@ def update_analytics(indicator_name, selected_location):
         risk_fig, risk_caption,
         corr_fig, corr_caption,
     )
+
+
+@callback(
+    Output("analytics-forecast-rmse-chart", "figure"),
+    Output("analytics-forecast-caption", "children"),
+    Input("selected-location", "data"),
+)
+def update_forecast_case_study(_selected_location):
+    """Doesn't actually depend on the selected location — the SARIMA
+    backtest is a per-location, all-15 comparison regardless of which one
+    is picked elsewhere on the dashboard. Triggers off selected-location
+    only because that's what's already guaranteed to fire once on page
+    load, same as every other callback on this page.
+    """
+    empty_msg = html.Div("No data available.", style={"fontSize": "12px", "color": MUTED})
+    try:
+        fc_df = get_fisherman_forecast()
+    except Exception:
+        return empty_chart(), html.Div("We couldn't load the SARIMA forecast data right now.")
+
+    if fc_df.empty:
+        return empty_chart(), html.Div(
+            "No SARIMA output yet — pipeline/build_forecasts.py hasn't been run.",
+            style={"fontSize": "12px", "color": MUTED},
+        )
+
+    # forecasts holds 48 rows per location (one per forecast hour) all
+    # sharing the same backtest_rmse/naive_rmse/model_type for that
+    # location's last run — collapse to one row per location.
+    per_loc = fc_df.groupby("location_name").first().reset_index()
+    per_loc = per_loc.dropna(subset=["backtest_rmse"]).sort_values("backtest_rmse")
+    if per_loc.empty:
+        return empty_chart(), html.Div(
+            "No backtest results yet — not enough history at any location to validate the model against.",
+            style={"fontSize": "12px", "color": MUTED},
+        )
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=per_loc["location_name"], y=per_loc["backtest_rmse"],
+        name="SARIMA (48h backtest)", marker_color=ACCENT_BLUE,
+    ))
+    has_naive = "naive_rmse" in per_loc.columns and per_loc["naive_rmse"].notna().any()
+    if has_naive:
+        fig.add_trace(go.Bar(
+            x=per_loc["location_name"], y=per_loc["naive_rmse"],
+            name="Naive baseline (‘tomorrow = today’)", marker_color="#CFE3E3",
+        ))
+    fig.update_layout(
+        barmode="group",
+        paper_bgcolor=CARD, plot_bgcolor=CARD, margin=dict(l=50, r=20, t=10, b=90),
+        font=dict(family="Public Sans, Arial", color=TEXT, size=11),
+        xaxis=dict(showgrid=False, zeroline=False, tickangle=-45, tickfont=dict(color=MUTED)),
+        yaxis=dict(title="RMSE (m) — lower is better", showgrid=True, gridcolor="#EDF1F3", tickfont=dict(color=MUTED)),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        hoverlabel=dict(bgcolor=NAVY, font_color="white"),
+    )
+
+    model_types = sorted(set(per_loc["model_type"].dropna())) if "model_type" in per_loc.columns else []
+    model_text = "; ".join(model_types) if model_types else "SARIMA"
+
+    if has_naive:
+        both = per_loc.dropna(subset=["naive_rmse"])
+        beats = int((both["backtest_rmse"] < both["naive_rmse"]).sum())
+        total = len(both)
+        mean_improvement = ((both["naive_rmse"] - both["backtest_rmse"]) / both["naive_rmse"] * 100).mean()
+        caption = _caption_box(
+            f"SARIMA beats a naive ‘assume tomorrow looks like today’ baseline at {beats}/{total} "
+            f"locations — an average {mean_improvement:.0f}% lower RMSE where it wins. "
+            f"Model spec, per coastal region: {model_text}."
+        )
+    else:
+        caption = _caption_box(
+            f"Model spec, per coastal region: {model_text}. Naive-baseline comparison will appear once the "
+            "pipeline has run with the naive_rmse column (added after this dashboard update)."
+        )
+    return fig, caption
