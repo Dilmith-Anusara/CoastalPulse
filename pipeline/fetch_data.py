@@ -11,15 +11,18 @@ Requires in .env:
                            dashboard -> Settings -> Database -> Connection
                            string -> URI. If your project only offers IPv6 on
                            the direct connection, use the "Session pooler"
-                           connection string instead (port 6543) — same URI
-                           format, just a different host/port. Test this
-                           before the real run; if it doesn't connect, it's
-                           almost certainly this.
+                           connection string instead (port 5432, host
+                           ...pooler.supabase.com, username postgres.<ref>) —
+                           IPv4-reachable, which the direct connection may not
+                           be from a CI runner. Test this before the real
+                           run; if it doesn't connect, it's almost certainly
+                           this.
 
 pip install requests supabase python-dotenv psycopg2-binary
 """
 
 import os
+import signal
 import time
 from datetime import date, timedelta
 
@@ -163,14 +166,42 @@ ALTER TABLE silver_hourly ADD COLUMN IF NOT EXISTS us_aqi DOUBLE PRECISION;
 """
 
 
+def connect_with_hard_timeout(db_url, seconds=20):
+    """psycopg2's own connect_timeout only bounds the TCP-connect phase —
+    NOT the DNS lookup before it, which can hang separately if a runner's
+    resolver misbehaves. Observed directly: a GitHub Actions run sat stuck
+    with zero output for 25+ minutes even with connect_timeout=15 already
+    set, well past what that alone should have allowed.
+
+    signal.alarm() forces a hard wall-clock bound regardless of which
+    layer is actually stuck, by interrupting the blocking call outright.
+    Unix-only (SIGALRM doesn't exist on Windows) — fine for GitHub
+    Actions' ubuntu-latest runners, which is the only place this has ever
+    hung; falls back to psycopg2's own connect_timeout alone on Windows,
+    where this has always connected quickly.
+    """
+    if not hasattr(signal, "SIGALRM"):
+        return psycopg2.connect(db_url, connect_timeout=seconds)
+
+    def _on_alarm(signum, frame):
+        raise TimeoutError(
+            f"DB connection did not complete within {seconds}s (hard wall-clock "
+            "timeout — likely a DNS or network hang that connect_timeout alone "
+            "doesn't cover)."
+        )
+
+    previous_handler = signal.signal(signal.SIGALRM, _on_alarm)
+    signal.alarm(seconds)
+    try:
+        return psycopg2.connect(db_url, connect_timeout=seconds)
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous_handler)
+
+
 def ensure_tables():
     """Create bronze_raw / silver_hourly if they don't exist yet. Idempotent."""
-    # connect_timeout: without one, a DB URL the runner can't route to (e.g.
-    # Supabase's direct/IPv6-only connection string from a CI runner with no
-    # outbound IPv6) hangs here indefinitely instead of failing fast — this
-    # was observed as a GitHub Actions job stuck for 28+ minutes with zero
-    # output, since this connect() call is the very first thing run() does.
-    conn = psycopg2.connect(SUPABASE_DB_URL, connect_timeout=15)
+    conn = connect_with_hard_timeout(SUPABASE_DB_URL)
     with conn.cursor() as cur:
         cur.execute(DDL)
         # Tables created via a direct connection aren't visible to PostgREST

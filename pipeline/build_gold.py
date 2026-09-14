@@ -425,7 +425,7 @@ def upsert_tourism(conn, df: pd.DataFrame):
 # locations, narrow ALL_LOCATION_NAMES below for EMERGENCY_LOCATIONS
 # specifically — this default errs toward not silently dropping locations.
 
-from fetch_data import LOCATIONS, TOURISM_ONLY
+from fetch_data import LOCATIONS, TOURISM_ONLY, connect_with_hard_timeout
 
 ALL_LOCATION_NAMES = [loc["name"] for loc in LOCATIONS]
 
@@ -443,10 +443,11 @@ def _run_with_reconnect(fn, *args, retries=3):
     connection alive for the whole run.
     """
     for attempt in range(retries):
-        # connect_timeout: same reasoning as fetch_data.py's ensure_tables()
-        # — an unroutable SUPABASE_DB_URL (e.g. IPv6-only from a CI runner
-        # with no outbound IPv6) should fail fast, not hang indefinitely.
-        conn = psycopg2.connect(SUPABASE_DB_URL, connect_timeout=15)
+        # Hard wall-clock timeout, not just connect_timeout — see
+        # fetch_data.connect_with_hard_timeout's docstring for why
+        # connect_timeout alone wasn't enough (a DNS-level hang isn't
+        # bounded by it).
+        conn = connect_with_hard_timeout(SUPABASE_DB_URL)
         try:
             # If THIS connection dies mid-transaction like the last run
             # did, don't let the orphaned backend sit "idle in
