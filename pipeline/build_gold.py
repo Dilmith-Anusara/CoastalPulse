@@ -31,6 +31,7 @@ formula — see compute_suitability_score's docstring for the citation.
 import os
 from dotenv import load_dotenv
 import psycopg2
+from psycopg2.extras import execute_values
 import pandas as pd
 import math
 from datetime import datetime
@@ -330,74 +331,98 @@ def build_tourism_daily(df: pd.DataFrame, location_name: str) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 def upsert_emergency(conn, df: pd.DataFrame):
+    """Batched via execute_values instead of one cur.execute() per row —
+    the row-by-row version measured at ~56s for a single location's 617
+    rows (one network round-trip per row over the Supabase pooler), which
+    extrapolated to ~14 minutes across 15 locations for this function
+    alone. Bulk-inserting all rows in one round-trip does the same work
+    in a fraction of a second — the DB work itself was never the
+    bottleneck, the per-row round-trip count was.
+    """
+    if df.empty:
+        return
     cur = conn.cursor()
-    for _, r in df.iterrows():
-        cur.execute(
-            """
-            INSERT INTO gold_emergency_daily
-                (location_name, date, wave_height_max, wind_speed_max,
-                 wind_gust_max, pressure_min, classification, hours_covered,
-                 sea_level_height_max)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (location_name, date) DO UPDATE SET
-                wave_height_max = EXCLUDED.wave_height_max,
-                wind_speed_max = EXCLUDED.wind_speed_max,
-                wind_gust_max = EXCLUDED.wind_gust_max,
-                pressure_min = EXCLUDED.pressure_min,
-                classification = EXCLUDED.classification,
-                hours_covered = EXCLUDED.hours_covered,
-                sea_level_height_max = EXCLUDED.sea_level_height_max;
-            """,
-            (
-                clean_value(r["location_name"]), clean_value(r["date"]), clean_value(r["wave_height_max"]),
-                clean_value(r["wind_speed_max"]), clean_value(r["wind_gust_max"]), clean_value(r["pressure_min"]),
-                clean_value(r["classification"]), int(r["hours_covered"]),
-                clean_value(r["sea_level_height_max"]),
-            ),
+    rows = [
+        (
+            clean_value(r["location_name"]), clean_value(r["date"]), clean_value(r["wave_height_max"]),
+            clean_value(r["wind_speed_max"]), clean_value(r["wind_gust_max"]), clean_value(r["pressure_min"]),
+            clean_value(r["classification"]), int(r["hours_covered"]),
+            clean_value(r["sea_level_height_max"]),
         )
+        for _, r in df.iterrows()
+    ]
+    execute_values(
+        cur,
+        """
+        INSERT INTO gold_emergency_daily
+            (location_name, date, wave_height_max, wind_speed_max,
+             wind_gust_max, pressure_min, classification, hours_covered,
+             sea_level_height_max)
+        VALUES %s
+        ON CONFLICT (location_name, date) DO UPDATE SET
+            wave_height_max = EXCLUDED.wave_height_max,
+            wind_speed_max = EXCLUDED.wind_speed_max,
+            wind_gust_max = EXCLUDED.wind_gust_max,
+            pressure_min = EXCLUDED.pressure_min,
+            classification = EXCLUDED.classification,
+            hours_covered = EXCLUDED.hours_covered,
+            sea_level_height_max = EXCLUDED.sea_level_height_max;
+        """,
+        rows,
+        page_size=1000,
+    )
     conn.commit()
     cur.close()
 
 
 def upsert_tourism(conn, df: pd.DataFrame):
+    """Batched via execute_values — see upsert_emergency's docstring for
+    why (measured ~38s row-by-row for one location's 617 rows)."""
+    if df.empty:
+        return
     cur = conn.cursor()
-    for _, r in df.iterrows():
-        cur.execute(
-            """
-            INSERT INTO gold_tourism_daily
-                (location_name, date, wave_height_mean, wind_speed_mean,
-                 sea_surface_temp_mean, uv_index_mean, precipitation_sum,
-                 suitability_score, daylight_hours_covered,
-                 humidity_mean, apparent_temperature_mean, air_temperature_max, cloud_cover_mean,
-                 dominant_weather_code, sunshine_hours_sum, us_aqi_mean)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (location_name, date) DO UPDATE SET
-                wave_height_mean = EXCLUDED.wave_height_mean,
-                wind_speed_mean = EXCLUDED.wind_speed_mean,
-                sea_surface_temp_mean = EXCLUDED.sea_surface_temp_mean,
-                uv_index_mean = EXCLUDED.uv_index_mean,
-                precipitation_sum = EXCLUDED.precipitation_sum,
-                suitability_score = EXCLUDED.suitability_score,
-                daylight_hours_covered = EXCLUDED.daylight_hours_covered,
-                humidity_mean = EXCLUDED.humidity_mean,
-                apparent_temperature_mean = EXCLUDED.apparent_temperature_mean,
-                air_temperature_max = EXCLUDED.air_temperature_max,
-                cloud_cover_mean = EXCLUDED.cloud_cover_mean,
-                dominant_weather_code = EXCLUDED.dominant_weather_code,
-                sunshine_hours_sum = EXCLUDED.sunshine_hours_sum,
-                us_aqi_mean = EXCLUDED.us_aqi_mean;
-            """,
-            (
-                clean_value(r["location_name"]), clean_value(r["date"]), clean_value(r["wave_height_mean"]),
-                clean_value(r["wind_speed_mean"]), clean_value(r["sea_surface_temp_mean"]),
-                clean_value(r["uv_index_mean"]), clean_value(r["precipitation_sum"]),
-                clean_value(r["suitability_score"]), int(r["daylight_hours_covered"]),
-                clean_value(r["humidity_mean"]), clean_value(r["apparent_temperature_mean"]),
-                clean_value(r["air_temperature_max"]), clean_value(r["cloud_cover_mean"]),
-                clean_value(r["dominant_weather_code"]), clean_value(r["sunshine_hours_sum"]),
-                clean_value(r["us_aqi_mean"]),
-            ),
+    rows = [
+        (
+            clean_value(r["location_name"]), clean_value(r["date"]), clean_value(r["wave_height_mean"]),
+            clean_value(r["wind_speed_mean"]), clean_value(r["sea_surface_temp_mean"]),
+            clean_value(r["uv_index_mean"]), clean_value(r["precipitation_sum"]),
+            clean_value(r["suitability_score"]), int(r["daylight_hours_covered"]),
+            clean_value(r["humidity_mean"]), clean_value(r["apparent_temperature_mean"]),
+            clean_value(r["air_temperature_max"]), clean_value(r["cloud_cover_mean"]),
+            clean_value(r["dominant_weather_code"]), clean_value(r["sunshine_hours_sum"]),
+            clean_value(r["us_aqi_mean"]),
         )
+        for _, r in df.iterrows()
+    ]
+    execute_values(
+        cur,
+        """
+        INSERT INTO gold_tourism_daily
+            (location_name, date, wave_height_mean, wind_speed_mean,
+             sea_surface_temp_mean, uv_index_mean, precipitation_sum,
+             suitability_score, daylight_hours_covered,
+             humidity_mean, apparent_temperature_mean, air_temperature_max, cloud_cover_mean,
+             dominant_weather_code, sunshine_hours_sum, us_aqi_mean)
+        VALUES %s
+        ON CONFLICT (location_name, date) DO UPDATE SET
+            wave_height_mean = EXCLUDED.wave_height_mean,
+            wind_speed_mean = EXCLUDED.wind_speed_mean,
+            sea_surface_temp_mean = EXCLUDED.sea_surface_temp_mean,
+            uv_index_mean = EXCLUDED.uv_index_mean,
+            precipitation_sum = EXCLUDED.precipitation_sum,
+            suitability_score = EXCLUDED.suitability_score,
+            daylight_hours_covered = EXCLUDED.daylight_hours_covered,
+            humidity_mean = EXCLUDED.humidity_mean,
+            apparent_temperature_mean = EXCLUDED.apparent_temperature_mean,
+            air_temperature_max = EXCLUDED.air_temperature_max,
+            cloud_cover_mean = EXCLUDED.cloud_cover_mean,
+            dominant_weather_code = EXCLUDED.dominant_weather_code,
+            sunshine_hours_sum = EXCLUDED.sunshine_hours_sum,
+            us_aqi_mean = EXCLUDED.us_aqi_mean;
+        """,
+        rows,
+        page_size=1000,
+    )
     conn.commit()
     cur.close()
 
