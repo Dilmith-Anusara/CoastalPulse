@@ -1,0 +1,10 @@
+# Exclude EDA/validation notebooks from GitHub's language statistics —
+# they're exploratory analysis artifacts, not the application. Without
+# this, their embedded cell outputs (plots as base64-encoded JSON) make
+# them dominate the repo's byte count (~1.8MB) over the actual Python app
+# (~380KB across app.py, pages/, pipeline/, data_access.py), so the
+# Languages bar reads "83% Jupyter Notebook" despite the project being a
+# Python dashboard + pipeline. linguist-documentation is GitHub's official
+# .gitattributes mechanism for this — see
+# https://github.com/github-linguist/linguist/blob/master/docs/overrides.md
+validation_scripts/*.ipynb linguist-documentation
