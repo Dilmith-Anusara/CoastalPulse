@@ -83,15 +83,21 @@ if TEST_MODE:
 # timestamp stayed frozen at June 30 — a real gap caught by checking the
 # two against each other directly.
 #
-# Now computed fresh on every run instead. The 2-day lag matches Open-
-# Meteo's own archive-api behavior: very recent days aren't fully
-# reanalyzed yet, so requesting through "today" risks a month chunk that's
-# mostly complete but a day or two short of SKIP_COVERAGE_THRESHOLD,
-# forcing an avoidable re-fetch of the same chunk on the next run.
+# Now computed fresh on every run instead. The 5-day buffer matches Open-
+# Meteo's own documented reanalysis lag for the two sources this pipeline
+# actually reads historically — archive-api's ERA5/ERA5-Land ("Daily with
+# 5 days delay") and the Marine API's ERA5-Ocean ("Daily with 5 days
+# delay"), per https://open-meteo.com/en/docs/historical-weather-api and
+# .../marine-weather-api. A shorter buffer doesn't just risk an incomplete
+# chunk — silver_chunk_covered() only checks that a row EXISTS for each
+# hour, not that its values are non-null, so requesting days still inside
+# the reanalysis window would write rows full of nulls that then look
+# "already covered" forever and never get re-fetched once the real data
+# is ready.
 # ---------------------------------------------------------------------------
 
 GLOBAL_START = date(2025, 1, 1)
-GLOBAL_END = date.today() - timedelta(days=2)
+GLOBAL_END = date.today() - timedelta(days=5)
 
 TIMEOUT = 90
 RETRIES = 5

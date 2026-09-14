@@ -1,0 +1,12 @@
+# Dependencies for the GitHub Actions pipeline job (pipeline/fetch_data.py,
+# build_gold.py, build_forecasts.py) — kept separate from requirements.txt
+# (the dashboard's own deps) so Vercel's serverless function never has to
+# install statsmodels/scipy, which the dashboard itself never imports.
+# Shared versions kept in sync with requirements.txt on purpose.
+pandas==3.0.3
+numpy==2.5.1
+python-dotenv==1.2.2
+supabase==2.31.0
+psycopg2-binary==2.9.12
+requests==2.34.2
+statsmodels>=0.14

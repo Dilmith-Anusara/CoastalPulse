@@ -1,0 +1,57 @@
+name: Data pipeline
+
+# Runs fetch_data.py -> build_gold.py -> build_forecasts.py, in that order,
+# once a day. Order matters: build_gold.py aggregates whatever's currently
+# in silver_hourly, and build_forecasts.py refits SARIMA on silver_hourly
+# too, so both need to run AFTER the fetch, not on a separate schedule.
+#
+# Daily is the right cadence, not more: archive-api/marine-api's own
+# reanalysis data (ERA5/ERA5-Land, ERA5-Ocean) lags 5 days behind real
+# time regardless of how often we ask, so running this more than once a
+# day wouldn't get any data any fresher — see fetch_data.py's GLOBAL_END
+# comment for the sources.
+on:
+  schedule:
+    # 20:00 UTC = 01:30 Asia/Colombo (next day) — after the day's data has
+    # a chance to be reanalyzed, off-peak for both Open-Meteo and Supabase.
+    - cron: "0 20 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: coastalpulse-data-pipeline
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pipeline dependencies
+        run: pip install -r requirements-pipeline.txt
+
+      - name: Fetch latest data (Bronze -> Silver)
+        working-directory: pipeline
+        run: python fetch_data.py
+
+      - name: Rebuild Gold aggregates
+        working-directory: pipeline
+        run: python build_gold.py
+
+      - name: Refresh 48h forecasts
+        working-directory: pipeline
+        run: python build_forecasts.py
