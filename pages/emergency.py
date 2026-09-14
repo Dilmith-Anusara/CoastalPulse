@@ -9,6 +9,7 @@ from data_access import (
     LOCATIONS,
     LOCATION_COORDS,
     get_emergency_data,
+    get_emergency_forecast,
 )
 from design_system import (
     BG, CARD, TEXT, MUTED, BORDER, NAVY, NAVY_2, LIVE_COLOR, LIVE_BG,
@@ -473,6 +474,39 @@ layout = html.Div(
                         "boxShadow": "0 2px 8px rgba(15, 45, 58, 0.035)",
                     },
                 ),
+
+                html.Div(style={"height": "8px"}),
+
+                # --- Forward-looking outlook strip — Open-Meteo forecast,
+                # same classify_wave_height() thresholds as the observed
+                # strip above, just pointed at emergency_forecast_daily.
+                # Kept in the always-visible verdict zone, not the
+                # details-only zone: an early warning is the whole point
+                # of an "Emergency" page, so it shouldn't be a click away.
+                html.Div(
+                    [
+                        section_title(
+                            "Next days",
+                            "Open-Meteo's forecast, classified with the same thresholds as above — so a "
+                            "Caution/Dangerous day ahead shows here even while today reads Safe.",
+                        ),
+                        html.Div(
+                            id="emergency-forecast-strip",
+                            style={
+                                "display": "grid",
+                                "gridTemplateColumns": "repeat(auto-fit, minmax(90px, 1fr))",
+                                "gap": "14px",
+                            },
+                        ),
+                    ],
+                    style={
+                        "backgroundColor": CARD,
+                        "border": f"1px solid {BORDER}",
+                        "borderRadius": "16px",
+                        "padding": "28px",
+                        "boxShadow": "0 2px 8px rgba(15, 45, 58, 0.035)",
+                    },
+                ),
             ],
             className="cp-verdict-zone",
         ),
@@ -580,6 +614,7 @@ layout = html.Div(
     Output("emergency-sea-level-value", "children"),
     Output("emergency-observation-value", "children"),
     Output("emergency-day-strip", "children"),
+    Output("emergency-forecast-strip", "children"),
     Output("emergency-wave-chart", "figure"),
     Output("emergency-wind-pressure-chart", "figure"),
     Input("selected-location", "data"),
@@ -612,6 +647,7 @@ def update_emergency_page(location):
             "—",
             "—",
             "0",
+            [],
             [],
             empty_chart(),
             empty_chart(),
@@ -646,6 +682,7 @@ def update_emergency_page(location):
             "—",
             "0",
             [],
+            [],
             empty_chart(),
             empty_chart(),
         )
@@ -676,6 +713,7 @@ def update_emergency_page(location):
             "—",
             "—",
             "0",
+            [],
             [],
             empty_chart(),
             empty_chart(),
@@ -773,6 +811,32 @@ def update_emergency_page(location):
             date_label = "—"
 
         day_cards.append(day_pill(day_label, date_label, dot_color, bg_color, row_classification))
+
+    # ========================================================
+    # FORECAST STRIP — same day_pill component, pointed forward at
+    # emergency_forecast_daily instead of backward at gold_emergency_daily.
+    # Doesn't fail the whole page if the forecast pipeline hasn't run yet
+    # for this location — just shows an empty strip, same as day_cards
+    # would for a location with no history.
+    # ========================================================
+    forecast_cards = []
+    try:
+        forecast_df = get_emergency_forecast(location)
+    except Exception:
+        forecast_df = pd.DataFrame()
+
+    for _, row in forecast_df.iterrows():
+        row_classification = str(row.get("classification", "Unknown"))
+        dot_color, bg_color, _ = classification_style(row_classification)
+
+        if pd.notna(row.get("date")):
+            day_label = row["date"].strftime("%a")
+            date_label = row["date"].strftime("%d %b")
+        else:
+            day_label = "—"
+            date_label = "—"
+
+        forecast_cards.append(day_pill(day_label, date_label, dot_color, bg_color, row_classification))
 
     # ========================================================
     # WAVE CHART — last CHART_WINDOW_DAYS only (full history is used
@@ -903,6 +967,7 @@ def update_emergency_page(location):
         sea_level_value,
         str(observation_count),
         day_cards,
+        forecast_cards,
         wave_fig,
         wind_pressure_fig,
     )

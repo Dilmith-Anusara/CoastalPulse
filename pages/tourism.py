@@ -23,7 +23,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 import pandas as pd
 
-from data_access import get_tourism_data, get_tourism_extras
+from data_access import get_tourism_data, get_tourism_extras, get_tourism_forecast
 from design_system import (
     CARD, TEXT, MUTED, BORDER, NAVY, NAVY_2,
     ACCENT_BLUE, ACCENT_ORANGE, ACCENT_TEAL, ACCENT_PINK, ACCENT_PURPLE, ACCENT_GREEN,
@@ -239,6 +239,17 @@ layout = html.Div(
                     ],
                     style=CARD_STYLE,
                 ),
+                html.Div(style={"height": "8px"}),
+                html.Div(
+                    [
+                        section_title(
+                            "Next days",
+                            "Open-Meteo's forecast, scored with the same HCI:Beach formula as above.",
+                        ),
+                        html.Div(id="tourism-forecast-strip"),
+                    ],
+                    style=CARD_STYLE,
+                ),
             ],
             className=VERDICT_ZONE_CLASS,
         ),
@@ -325,6 +336,7 @@ layout = html.Div(
 @callback(
     Output("tourism-hero", "children"),
     Output("tourism-day-strip", "children"),
+    Output("tourism-forecast-strip", "children"),
     Output("tourism-condition-chips", "children"),
     Output("tourism-extra-chips", "children"),
     Output("tourism-sea-wind-chart", "figure"),
@@ -338,7 +350,7 @@ def update_tourism_page(location):
     if not location:
         return (
             html.Div("Choose a location to see beach conditions.", style={"color": "white", "fontSize": "16px"}),
-            html.Div(), [], [], empty_chart(), empty_chart(), empty_chart(), html.Div(),
+            html.Div(), [], [], [], empty_chart(), empty_chart(), empty_chart(), html.Div(),
         )
 
     try:
@@ -346,13 +358,13 @@ def update_tourism_page(location):
     except Exception:
         return (
             html.Div(f"We couldn't load data for {location} right now.", style={"color": "white", "fontSize": "16px"}),
-            html.Div(), [], [], empty_chart(), empty_chart(), empty_chart(), html.Div(),
+            html.Div(), [], [], [], empty_chart(), empty_chart(), empty_chart(), html.Div(),
         )
 
     if df is None or df.empty:
         return (
             html.Div(f"No data available for {location}.", style={"color": "white", "fontSize": "16px"}),
-            html.Div(), [], [], empty_chart(), empty_chart(), empty_chart(), html.Div(),
+            html.Div(), [], [], [], empty_chart(), empty_chart(), empty_chart(), html.Div(),
         )
 
     data = df.copy()
@@ -440,6 +452,25 @@ def update_tourism_page(location):
         date_label = row["date"].strftime("%d %b") if pd.notna(row.get("date")) else "—"
         pills.append(day_pill(day_label, date_label, row_color, f"{row_color}22", badge_text))
     day_strip = day_strip_grid(pills)
+
+    # --- Forward-looking outlook strip — same score_band() coloring,
+    # pointed at tourism_forecast_daily instead of gold_tourism_daily.
+    # Doesn't fail the page if the forecast pipeline hasn't run yet for
+    # this location — just renders an empty strip.
+    try:
+        forecast_df = get_tourism_forecast(location)
+    except Exception:
+        forecast_df = pd.DataFrame()
+
+    forecast_pills = []
+    for _, row in forecast_df.iterrows():
+        _, row_color = score_band(row.get("suitability_score"))
+        row_score = row.get("suitability_score")
+        badge_text = f"{row_score:.0f}" if pd.notna(row_score) else "—"
+        day_label = row["date"].strftime("%a") if pd.notna(row.get("date")) else "—"
+        date_label = row["date"].strftime("%d %b") if pd.notna(row.get("date")) else "—"
+        forecast_pills.append(day_pill(day_label, date_label, row_color, f"{row_color}22", badge_text))
+    forecast_strip = day_strip_grid(forecast_pills)
 
     # --- Condition metric cards ---
     wave_label = _wave_band(latest.get("wave_height_mean"))
@@ -562,7 +593,7 @@ def update_tourism_page(location):
     else:
         sst_fig = empty_chart("No sea temperature data for this location")
 
-    return hero, day_strip, chips, extra_chips, sea_wind_fig, sun_rain_fig, sst_fig, sst_note
+    return hero, day_strip, forecast_strip, chips, extra_chips, sea_wind_fig, sun_rain_fig, sst_fig, sst_note
 
 
 # ============================================================

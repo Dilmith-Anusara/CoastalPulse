@@ -97,7 +97,7 @@ jobs:
         working-directory: pipeline
         run: python build_gold.py
 
-      - name: Refresh Fisherman forecast (Open-Meteo)
+      - name: Refresh Open-Meteo forecast (Fisherman/Emergency/Tourism)
         working-directory: pipeline
         run: python fetch_marine_forecast.py
 

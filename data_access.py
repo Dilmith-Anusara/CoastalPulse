@@ -417,3 +417,55 @@ def get_marine_forecast(location: str | None = None) -> pd.DataFrame:
         df["forecast_time"] = pd.to_datetime(df["forecast_time"])
         df["generated_at"] = pd.to_datetime(df["generated_at"])
     return df
+
+
+@cache_stub
+def get_emergency_forecast(location: str | None = None) -> pd.DataFrame:
+    """
+    Forward-looking counterpart to get_emergency_data(): an up-to-8-day
+    daily outlook from `emergency_forecast_daily` (pipeline/fetch_marine_
+    forecast.py), classified with the exact same classify_wave_height()
+    thresholds pipeline/build_gold.py uses for the real (observed) table —
+    the forecast table is built by importing and calling that same
+    function, not a second copy of the Safe/Caution/Dangerous bands.
+
+    location=None returns all 15 locations. Returns an empty DataFrame (not
+    mock data) if the forecast pipeline hasn't been run yet for this
+    location.
+    """
+    _validate_location(location)
+    eq = ("location_name", location) if location else None
+    rows = _fetch_all_rows("emergency_forecast_daily", order=["date", "location_name"], eq=eq)
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df["date"] = pd.to_datetime(df["date"])
+        df["generated_at"] = pd.to_datetime(df["generated_at"])
+    return df
+
+
+@cache_stub
+def get_tourism_forecast(location: str | None = None) -> pd.DataFrame:
+    """
+    Forward-looking counterpart to get_tourism_data(): an up-to-8-day daily
+    outlook from `tourism_forecast_daily` (pipeline/fetch_marine_
+    forecast.py), scored with the exact same compute_suitability_score()
+    (HCI:Beach) pipeline/build_gold.py uses for the real (observed) table.
+
+    Narrower than gold_tourism_daily by design — only the fields the score
+    formula actually needs (air_temperature_max, humidity_mean,
+    cloud_cover_mean, precipitation_sum, wind_speed_mean) plus wave_height_
+    mean; sea_surface_temp/uv_index/AQI aren't fetched in forecast mode, so
+    there's nothing to aggregate for those here.
+
+    location=None returns all 15 locations. Returns an empty DataFrame (not
+    mock data) if the forecast pipeline hasn't been run yet for this
+    location.
+    """
+    _validate_location(location)
+    eq = ("location_name", location) if location else None
+    rows = _fetch_all_rows("tourism_forecast_daily", order=["date", "location_name"], eq=eq)
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df["date"] = pd.to_datetime(df["date"])
+        df["generated_at"] = pd.to_datetime(df["generated_at"])
+    return df
