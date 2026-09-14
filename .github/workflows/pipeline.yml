@@ -39,7 +39,10 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          # numpy==2.5.1 (requirements-pipeline.txt, pinned to match
+          # requirements.txt) requires Python >=3.12 — 3.11 fails to
+          # resolve it even though pandas==3.0.3 installs fine under 3.11.
+          python-version: "3.12"
 
       - name: Install pipeline dependencies
         run: pip install -r requirements-pipeline.txt
