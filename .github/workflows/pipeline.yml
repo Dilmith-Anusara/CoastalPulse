@@ -27,7 +27,14 @@ permissions:
 jobs:
   run-pipeline:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # 45min wasn't enough for the initial catch-up run: Open-Meteo reads
+    # from GitHub's runner IPs were consistently needing a retry (each
+    # costing a wasted 90s timeout + 5s delay) across ~225 API calls, since
+    # 3 months of backlog needed fetching at once. Routine daily runs need
+    # far fewer calls (~1 current-month chunk instead of 3) so should
+    # finish well under this — 60 is headroom for a bad-network day, not
+    # the expected runtime.
+    timeout-minutes: 60
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
