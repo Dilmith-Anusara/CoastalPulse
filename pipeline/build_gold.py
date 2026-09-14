@@ -443,7 +443,10 @@ def _run_with_reconnect(fn, *args, retries=3):
     connection alive for the whole run.
     """
     for attempt in range(retries):
-        conn = psycopg2.connect(SUPABASE_DB_URL)
+        # connect_timeout: same reasoning as fetch_data.py's ensure_tables()
+        # — an unroutable SUPABASE_DB_URL (e.g. IPv6-only from a CI runner
+        # with no outbound IPv6) should fail fast, not hang indefinitely.
+        conn = psycopg2.connect(SUPABASE_DB_URL, connect_timeout=15)
         try:
             # If THIS connection dies mid-transaction like the last run
             # did, don't let the orphaned backend sit "idle in

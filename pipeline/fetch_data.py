@@ -165,7 +165,12 @@ ALTER TABLE silver_hourly ADD COLUMN IF NOT EXISTS us_aqi DOUBLE PRECISION;
 
 def ensure_tables():
     """Create bronze_raw / silver_hourly if they don't exist yet. Idempotent."""
-    conn = psycopg2.connect(SUPABASE_DB_URL)
+    # connect_timeout: without one, a DB URL the runner can't route to (e.g.
+    # Supabase's direct/IPv6-only connection string from a CI runner with no
+    # outbound IPv6) hangs here indefinitely instead of failing fast — this
+    # was observed as a GitHub Actions job stuck for 28+ minutes with zero
+    # output, since this connect() call is the very first thing run() does.
+    conn = psycopg2.connect(SUPABASE_DB_URL, connect_timeout=15)
     with conn.cursor() as cur:
         cur.execute(DDL)
         # Tables created via a direct connection aren't visible to PostgREST
