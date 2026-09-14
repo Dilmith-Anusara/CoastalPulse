@@ -32,6 +32,14 @@ jobs:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
       SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+      # Python fully block-buffers stdout when it isn't a real terminal
+      # (true for a GitHub Actions step, which captures output through a
+      # pipe) — print() calls queue up silently instead of appearing live,
+      # which made a run that was actually working fine (confirmed: data
+      # was landing in Supabase the whole time) look hung with "no output"
+      # for many minutes. This forces line-by-line flushing so the log
+      # actually reflects progress in real time.
+      PYTHONUNBUFFERED: "1"
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
