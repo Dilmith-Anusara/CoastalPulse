@@ -413,7 +413,7 @@ layout = html.Div(
                 html.Div(id="fisherman-forecast-note", style={"marginBottom": "20px"}),
                 chart_card(
                     "Wave height forecast",
-                    "Open-Meteo's operational wave-model forecast for this location — not a model we fit ourselves.",
+                    "Open-Meteo's operational wave-model forecast for this location.",
                     "fisherman-forecast", height=380,
                 ),
                 html.Div(style={"height": "20px"}),
@@ -504,7 +504,7 @@ def update_fisherman_page(location):
         age_text = f"{int(age.total_seconds() / 3600)}h ago" if age.total_seconds() < 48 * 3600 else f"{int(age.total_seconds() / 86400)}d ago"
         note = _note_box(
             "Source: Open-Meteo Marine Weather Forecast — a blend of operational ocean/wave models "
-            "(ECMWF WAM, NOAA GFS Wave, MeteoFrance MFWAM, DWD EWAM/GWAM), not a model we fit ourselves. "
+            "(ECMWF WAM, NOAA GFS Wave, MeteoFrance MFWAM, DWD EWAM/GWAM). "
             f"Forecast generated {age_text} — refreshed whenever the pipeline is re-run, not on every page load.",
             color=ACCENT_BLUE, bg="#EAF2FB",
         )
