@@ -273,6 +273,24 @@ def empty_map():
     return fig
 
 
+def note_box(text, color=ACCENT_ORANGE, bg="#FFF7E8"):
+    """A short highlighted callout box (colored left border + tinted
+    background) — used for cross-page safety notes and data-availability
+    caveats (e.g. Fisherman's wind/wave-correlation warning, Tourism's
+    cross-reference to Emergency's danger classification) so every such
+    callout across the app looks the same instead of each page styling
+    its own.
+    """
+    return html.Div(
+        text,
+        style={
+            "backgroundColor": bg, "padding": "12px 16px",
+            "borderLeft": f"4px solid {color}", "borderRadius": "6px",
+            "fontSize": "13px", "color": TEXT, "lineHeight": "1.6",
+        },
+    )
+
+
 def stat_gauge_figure(value, value_max, bar_color, steps, suffix="", height=190):
     """Generic 0..value_max gauge with colored bands — used for any
     single-number visual indicator (Emergency's wave height, Tourism's

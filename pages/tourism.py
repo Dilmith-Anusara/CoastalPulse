@@ -23,13 +23,16 @@ import plotly.graph_objects as go
 import plotly.express as px
 import pandas as pd
 
-from data_access import get_tourism_data, get_tourism_extras, get_tourism_forecast
+from data_access import (
+    get_tourism_data, get_tourism_extras, get_tourism_forecast,
+    get_emergency_data, get_emergency_forecast,
+)
 from design_system import (
     CARD, TEXT, MUTED, BORDER, NAVY, NAVY_2,
     ACCENT_BLUE, ACCENT_ORANGE, ACCENT_TEAL, ACCENT_PINK, ACCENT_PURPLE,
     PAGE_STYLE, HERO_STYLE, CARD_STYLE, VERDICT_ZONE_CLASS, DETAIL_ZONE_CLASS,
     section_title, metric_card, chart_card, day_pill, day_strip_grid,
-    empty_chart, empty_map, stat_gauge_figure,
+    empty_chart, empty_map, stat_gauge_figure, note_box,
 )
 
 try:
@@ -205,6 +208,7 @@ layout = html.Div(
         html.Div(
             [
                 html.Div(id="tourism-hero", style=HERO_STYLE),
+                html.Div(id="tourism-sea-safety-note", style={"marginBottom": "16px"}),
                 html.Div(id="tourism-best-pick", style={"marginBottom": "24px"}),
                 html.Div(
                     [
@@ -225,6 +229,7 @@ layout = html.Div(
                             id="tourism-forecast-generated",
                             style={"fontSize": "11px", "color": MUTED, "marginTop": "14px"},
                         ),
+                        html.Div(id="tourism-sea-safety-forecast-note", style={"marginTop": "14px"}),
                     ],
                     style=CARD_STYLE,
                 ),
@@ -313,9 +318,11 @@ layout = html.Div(
 
 @callback(
     Output("tourism-hero", "children"),
+    Output("tourism-sea-safety-note", "children"),
     Output("tourism-day-strip", "children"),
     Output("tourism-forecast-strip", "children"),
     Output("tourism-forecast-generated", "children"),
+    Output("tourism-sea-safety-forecast-note", "children"),
     Output("tourism-condition-chips", "children"),
     Output("tourism-extra-chips", "children"),
     Output("tourism-sea-wind-chart", "figure"),
@@ -329,7 +336,7 @@ def update_tourism_page(location):
     if not location:
         return (
             html.Div("Choose a location to see beach conditions.", style={"color": "white", "fontSize": "16px"}),
-            html.Div(), [], "", [], [], empty_chart(), empty_chart(), empty_chart(), html.Div(),
+            None, html.Div(), [], "", None, [], [], empty_chart(), empty_chart(), empty_chart(), html.Div(),
         )
 
     try:
@@ -337,13 +344,13 @@ def update_tourism_page(location):
     except Exception:
         return (
             html.Div(f"We couldn't load data for {location} right now.", style={"color": "white", "fontSize": "16px"}),
-            html.Div(), [], "", [], [], empty_chart(), empty_chart(), empty_chart(), html.Div(),
+            None, html.Div(), [], "", None, [], [], empty_chart(), empty_chart(), empty_chart(), html.Div(),
         )
 
     if df is None or df.empty:
         return (
             html.Div(f"No data available for {location}.", style={"color": "white", "fontSize": "16px"}),
-            html.Div(), [], "", [], [], empty_chart(), empty_chart(), empty_chart(), html.Div(),
+            None, html.Div(), [], "", None, [], [], empty_chart(), empty_chart(), empty_chart(), html.Div(),
         )
 
     data = df.copy()
@@ -420,6 +427,30 @@ def update_tourism_page(location):
         style={"display": "flex", "justifyContent": "space-between", "alignItems": "center", "gap": "40px", "width": "100%"},
     )
 
+    # --- Cross-reference to Emergency's danger classification — the
+    # suitability score never includes wave height (HCI:Beach measures
+    # beach-day comfort, not sea safety), so a day can score well here
+    # while Emergency simultaneously flags the water itself as unsafe.
+    # Only shown when it's actually Caution/Dangerous, not on every visit.
+    # --------------------------------------------------------
+    try:
+        em_df = get_emergency_data(location)
+    except Exception:
+        em_df = pd.DataFrame()
+
+    sea_safety_note = None
+    if not em_df.empty and "date" in em_df.columns:
+        em_today = em_df[em_df["date"] == latest["date"]]
+        if not em_today.empty:
+            today_classification = str(em_today.iloc[0].get("classification", ""))
+            if today_classification in ("Caution", "Dangerous"):
+                sea_safety_note = note_box(
+                    f"Sea conditions today: {today_classification} — this score covers beach-day comfort "
+                    "(temperature, rain, wind, cloud cover), not sea safety. Check Emergency before swimming.",
+                    color=ACCENT_ORANGE if today_classification == "Caution" else "#e74c3c",
+                    bg="#FFF7E8" if today_classification == "Caution" else "#FDEBED",
+                )
+
     # --- 7-day strip ---
     recent = data.tail(7)
     pills = []
@@ -464,6 +495,27 @@ def update_tourism_page(location):
         forecast_generated_text = f"Forecast generated {gen_age_text} — refreshed whenever the pipeline is re-run."
     else:
         forecast_generated_text = ""
+
+    # --- Same cross-reference as the hero note, but against the upcoming
+    # days instead of today: a day can show a high suitability score here
+    # while Emergency's forecast flags rough seas for that same date,
+    # since the score never factors in wave height.
+    try:
+        em_forecast_df = get_emergency_forecast(location)
+    except Exception:
+        em_forecast_df = pd.DataFrame()
+
+    sea_safety_forecast_note = None
+    if not em_forecast_df.empty and not forecast_df.empty and "date" in em_forecast_df.columns:
+        flagged_dates = em_forecast_df[em_forecast_df["classification"].isin(["Caution", "Dangerous"])]["date"]
+        flagged_in_window = forecast_df[forecast_df["date"].isin(flagged_dates)]
+        if not flagged_in_window.empty:
+            day_list = ", ".join(d.strftime("%a %d %b") for d in sorted(flagged_in_window["date"]))
+            sea_safety_forecast_note = note_box(
+                f"Sea conditions are flagged Caution or Dangerous on: {day_list}. This outlook covers beach-day "
+                "comfort, not sea safety — check Emergency's forecast before swimming on those days.",
+                color=ACCENT_ORANGE, bg="#FFF7E8",
+            )
 
     # --- Condition metric cards ---
     wave_label = _wave_band(latest.get("wave_height_mean"))
@@ -597,7 +649,10 @@ def update_tourism_page(location):
     else:
         sst_fig = empty_chart("No sea temperature data for this location")
 
-    return hero, day_strip, forecast_strip, forecast_generated_text, chips, extra_chips, sea_wind_fig, sun_rain_fig, sst_fig, sst_note
+    return (
+        hero, sea_safety_note, day_strip, forecast_strip, forecast_generated_text, sea_safety_forecast_note,
+        chips, extra_chips, sea_wind_fig, sun_rain_fig, sst_fig, sst_note,
+    )
 
 
 # ============================================================

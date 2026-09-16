@@ -60,7 +60,7 @@ from design_system import (
     VERDICT_ZONE_CLASS, DETAIL_ZONE_CLASS,
     ACCENT_BLUE, ACCENT_PURPLE, ACCENT_ORANGE, ACCENT_GREEN, ACCENT_TEAL,
     section_title, metric_card, chart_card, day_pill, day_strip_grid,
-    empty_chart, stat_gauge_figure,
+    empty_chart, stat_gauge_figure, note_box,
 )
 from page_helpers import CLASSIFICATION_COLORS
 
@@ -176,7 +176,12 @@ def _history_context_text(history_wave_series, current_wave, location_label):
     return f"Fairly typical for {location_label} — around the middle of the range recorded here."
 
 
-def _hero_left(classification, wave_value, observed_time, history_note):
+def _hero_left(location, classification, wave_value, observed_time, history_note):
+    """Same hero layout as Emergency/Tourism: an eyebrow label, then the
+    location name and status badge side by side, then the verdict
+    sentence — this page used to skip the location name entirely, the
+    one thing missing that both other pages already show here.
+    """
     color, _ = _classification_style(classification)
     verdict_text = _FISHERMAN_VERDICT_TEXT.get(classification, _FISHERMAN_VERDICT_TEXT[None])
     time_text = (
@@ -195,14 +200,22 @@ def _hero_left(classification, wave_value, observed_time, history_note):
                 },
             ),
             html.Div(
-                html.Span(
-                    (classification or "UNKNOWN").upper(),
-                    style={
-                        "fontSize": "11px", "fontWeight": "800", "letterSpacing": "0.6px",
-                        "backgroundColor": f"{color}22", "color": color,
-                        "padding": "7px 12px", "borderRadius": "20px",
-                    },
-                ),
+                [
+                    html.Div(
+                        location or "Choose a location",
+                        style={"fontSize": "24px", "fontWeight": "750", "color": "white"},
+                    ),
+                    html.Span(
+                        (classification or "UNKNOWN").upper(),
+                        style={
+                            "marginLeft": "14px",
+                            "fontSize": "11px", "fontWeight": "800", "letterSpacing": "0.6px",
+                            "backgroundColor": f"{color}22", "color": color,
+                            "padding": "7px 12px", "borderRadius": "20px",
+                        },
+                    ),
+                ],
+                style={"display": "flex", "alignItems": "center", "flexWrap": "wrap", "rowGap": "10px"},
             ),
             html.Div(
                 verdict_text,
@@ -306,7 +319,7 @@ def _wind_wave_note(location):
     """
     if location not in LOW_WIND_WAVE_CORRELATION_LOCATIONS:
         return None
-    return _note_box(
+    return note_box(
         f"At {location}, wave height doesn't reliably reflect wind conditions "
         "(historically r≈0.35-0.40 here vs. ~0.61 Sri-Lanka-wide) — check the "
         "wind reading above even when the wave height alone looks calm.",
@@ -352,23 +365,12 @@ def _window_note(forecast_df):
 
 
 def _swell_breakdown_note():
-    return _note_box(
+    return note_box(
         "Primary swell is usually the dominant driver of surfable wave energy; wind waves are locally "
         "wind-driven and choppier at short range; secondary swell (when the model resolves one) is a "
         "second wave train arriving from a different, more distant storm system. All three combine into "
         "the single wave-height number above.",
         color=ACCENT_TEAL, bg="#EAF7F5",
-    )
-
-
-def _note_box(text, color=ACCENT_ORANGE, bg="#FFF7E8"):
-    return html.Div(
-        text,
-        style={
-            "backgroundColor": bg, "padding": "12px 16px",
-            "borderLeft": f"4px solid {color}", "borderRadius": "6px",
-            "fontSize": "13px", "color": TEXT, "lineHeight": "1.6",
-        },
     )
 
 
@@ -461,8 +463,8 @@ layout = html.Div(
 )
 def update_fisherman_page(location):
     if not location:
-        empty_hero = _hero_left(None, None, None, "")
-        placeholder = _note_box("Choose a location above to see a forecast.")
+        empty_hero = _hero_left(None, None, None, None, "")
+        placeholder = note_box("Choose a location above to see a forecast.")
         return empty_hero, _wave_gauge_figure(0, "#71828C"), [], None, None, placeholder, empty_chart(), None, empty_chart(), empty_chart()
 
     forecast_df = get_marine_forecast(location)
@@ -485,11 +487,11 @@ def update_fisherman_page(location):
             if daily_df is not None and not daily_df.empty and "wave_height_max" in daily_df.columns
             else ""
         )
-        hero = _hero_left(classification, wave_value, latest.get("timestamp"), history_note)
+        hero = _hero_left(location, classification, wave_value, latest.get("timestamp"), history_note)
         gauge_fig = _wave_gauge_figure(wave_value, _classification_style(classification)[0])
         conditions_grid = _conditions_grid(latest)
     else:
-        hero = _hero_left(None, None, None, "")
+        hero = _hero_left(location, None, None, None, "")
         gauge_fig = _wave_gauge_figure(0, "#71828C")
         conditions_grid = _conditions_grid(None)
 
@@ -498,7 +500,7 @@ def update_fisherman_page(location):
     window_note = _window_note(forecast_df)
 
     if forecast_df.empty:
-        note = _note_box(
+        note = note_box(
             f"No forecast available for {location} yet — the forecast pipeline "
             "(pipeline/fetch_marine_forecast.py) hasn't been run for this location. "
             "This is a data-availability gap, not a broken chart.",
@@ -507,7 +509,7 @@ def update_fisherman_page(location):
         generated = forecast_df["generated_at"].iloc[0]
         age = pd.Timestamp.now("UTC") - generated
         age_text = f"{int(age.total_seconds() / 3600)}h ago" if age.total_seconds() < 48 * 3600 else f"{int(age.total_seconds() / 86400)}d ago"
-        note = _note_box(
+        note = note_box(
             "Source: Open-Meteo Marine Weather Forecast — a blend of operational ocean/wave models "
             "(ECMWF WAM, NOAA GFS Wave, MeteoFrance MFWAM, DWD EWAM/GWAM). "
             f"Forecast generated {age_text} — refreshed whenever the pipeline is re-run, not on every page load.",
