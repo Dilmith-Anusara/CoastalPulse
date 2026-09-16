@@ -118,7 +118,7 @@ def aqi_band(value):
 HISTORY_MIN_ROWS = 30
 
 
-def value_percentile_note(value, history_series, noun="reading", min_rows=HISTORY_MIN_ROWS):
+def value_percentile_note(value, history_series, min_rows=HISTORY_MIN_ROWS):
     """Plain-language comparison of `value` against this location's own
     full recorded history for the same metric — for metrics with no
     established safety or suitability scale (wind speed, wind gust,
@@ -139,11 +139,11 @@ def value_percentile_note(value, history_series, noun="reading", min_rows=HISTOR
         return ""
     percentile = (valid <= value).mean() * 100
     if percentile >= 95:
-        return f"Among the highest {noun} recorded here"
+        return "Very high"
     if percentile >= 70:
-        return f"Higher than {percentile:.0f}% of {noun} recorded here"
+        return "Above average"
     if percentile <= 5:
-        return f"Among the lowest {noun} recorded here"
+        return "Very low"
     if percentile <= 30:
-        return f"Lower than {100 - percentile:.0f}% of {noun} recorded here"
+        return "Below average"
     return "Typical for this location"

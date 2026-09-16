@@ -779,10 +779,10 @@ def update_emergency_page(location):
     # value_percentile_note) rather than a fabricated severity color.
     # --------------------------------------------------------
     wave_note = classification if pd.notna(wave) else None
-    wind_note = value_percentile_note(wind, data["wind_speed_max"], "days") if "wind_speed_max" in data.columns else ""
-    gust_note = value_percentile_note(gust, data["wind_gust_max"], "days") if "wind_gust_max" in data.columns else ""
-    pressure_note = value_percentile_note(pressure, data["pressure_min"], "days") if "pressure_min" in data.columns else ""
-    sea_level_note = value_percentile_note(sea_level, data["sea_level_height_max"], "days") if "sea_level_height_max" in data.columns else ""
+    wind_note = value_percentile_note(wind, data["wind_speed_max"]) if "wind_speed_max" in data.columns else ""
+    gust_note = value_percentile_note(gust, data["wind_gust_max"]) if "wind_gust_max" in data.columns else ""
+    pressure_note = value_percentile_note(pressure, data["pressure_min"]) if "pressure_min" in data.columns else ""
+    sea_level_note = value_percentile_note(sea_level, data["sea_level_height_max"]) if "sea_level_height_max" in data.columns else ""
 
     metric_cards = [
         metric_card("≈", "Maximum wave height", wave_value, "m", status_color, note=wave_note),

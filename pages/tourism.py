@@ -486,15 +486,15 @@ def update_tourism_page(location):
     weather_note = f"{cloud_val:.0f}% cloud cover" if pd.notna(cloud_val) else None
     aqi_val = latest.get("us_aqi_mean")
 
-    feels_like_note = value_percentile_note(feels_like_val, data["apparent_temperature_mean"], "days") if "apparent_temperature_mean" in data.columns else ""
-    wind_note = value_percentile_note(wind_val, data["wind_speed_mean"], "days") if "wind_speed_mean" in data.columns else ""
-    humidity_note = value_percentile_note(humidity_val, data["humidity_mean"], "days") if "humidity_mean" in data.columns else ""
-    sst_note = value_percentile_note(sst, data["sea_surface_temp_mean"], "days") if "sea_surface_temp_mean" in data.columns else ""
+    feels_like_note = value_percentile_note(feels_like_val, data["apparent_temperature_mean"]) if "apparent_temperature_mean" in data.columns else ""
+    wind_note = value_percentile_note(wind_val, data["wind_speed_mean"]) if "wind_speed_mean" in data.columns else ""
+    humidity_note = value_percentile_note(humidity_val, data["humidity_mean"]) if "humidity_mean" in data.columns else ""
+    sst_note = value_percentile_note(sst, data["sea_surface_temp_mean"]) if "sea_surface_temp_mean" in data.columns else ""
     if not sst_note and pd.isna(sst):
         # Same wording as fisherman.py's identical case — null by design at
         # the 5 TOURISM_ONLY locations (no marine_ocean fetch there).
         sst_note = "Not measured at this location"
-    sunshine_note = value_percentile_note(sunshine_val, data["sunshine_hours_sum"], "days") if "sunshine_hours_sum" in data.columns else ""
+    sunshine_note = value_percentile_note(sunshine_val, data["sunshine_hours_sum"]) if "sunshine_hours_sum" in data.columns else ""
 
     chips = [
         metric_card("\u2601", "Weather", weather_text, "", accent=ACCENT_PURPLE, note=weather_note),
