@@ -36,7 +36,7 @@ from dash import html, dcc, callback, Input, Output
 import plotly.graph_objects as go
 import pandas as pd
 
-from data_access import get_emergency_data, get_tourism_data, get_fisherman_forecast, LOCATION_COORDS
+from data_access import get_emergency_data, get_tourism_data, get_marine_forecast, LOCATION_COORDS
 from page_helpers import CLASSIFICATION_COLORS, EMERGENCY_VERDICT_TEXT, score_band
 
 dash.register_page(__name__, path="/", name="Overview")
@@ -388,7 +388,7 @@ def update_overview_live(pathname):
         tm_df = pd.DataFrame()
 
     try:
-        fc_df = get_fisherman_forecast()
+        fc_df = get_marine_forecast()
     except Exception:
         fc_df = pd.DataFrame()
 
@@ -436,11 +436,11 @@ def update_overview_live(pathname):
         f"Best now: {best_name} — {best_score:.0f}/100" if best_name else "Current suitability scores, 15 locations"
     )
 
-    mode_stat_fisherman = "48h forecasts not generated yet"
+    mode_stat_fisherman = "Forecasts not generated yet"
     if fc_df is not None and not fc_df.empty:
         fc = fc_df.copy().sort_values(["location_name", "forecast_time"])
         earliest = fc.groupby("location_name", as_index=False).first()
-        earliest["classification"] = earliest["wave_height_forecast"].apply(_classify_wave)
+        earliest["classification"] = earliest["wave_height"].apply(_classify_wave)
         n_safe = int((earliest["classification"] == "Safe").sum())
         n_total = len(earliest)
         mode_stat_fisherman = f"{n_safe}/{n_total} locations forecast Safe soon" if n_total else mode_stat_fisherman
@@ -526,17 +526,17 @@ def update_overview_snapshot(location):
     else:
         rows.append(_snapshot_row("Tourism", location, "—", None, None, None, "No data yet for this location.", "/tourism"))
 
-    # --- Fisherman row (real SARIMA forecast, see pipeline/build_forecasts.py) ---
-    fc_df = get_fisherman_forecast(location)
+    # --- Fisherman row (Open-Meteo live forecast, see pipeline/fetch_marine_forecast.py) ---
+    fc_df = get_marine_forecast(location)
     if not fc_df.empty:
         next_hour = fc_df.iloc[0]
-        wave = next_hour.get("wave_height_forecast")
+        wave = next_hour.get("wave_height")
         status = _classify_wave(wave)
         color = CLASSIFICATION_COLORS.get(status, "#999")
         wave_text = f"{wave:.1f}m" if wave is not None and pd.notna(wave) else "—"
         forecast_time = next_hour.get("forecast_time")
         time_text = forecast_time.strftime("%H:%M") if forecast_time is not None and pd.notna(forecast_time) else ""
-        note = f"48h wave forecast — next reading {time_text}" if time_text else "48h wave forecast"
+        note = f"8-day wave forecast — next reading {time_text}" if time_text else "8-day wave forecast"
         rows.append(_snapshot_row("Fisherman", location, wave_text, wave, status, color, note, "/fisherman"))
     else:
         rows.append(_snapshot_row("Fisherman", location, "—", None, None, None, "No forecast yet for this location.", "/fisherman"))
