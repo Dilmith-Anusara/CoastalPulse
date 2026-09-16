@@ -178,8 +178,14 @@ def _empty_metric_cards():
         metric_card("≈", "Maximum wave height", "—", "m", MUTED),
         metric_card("≋", "Maximum wind speed", "—", "km/h", MUTED),
         metric_card("↯", "Maximum wind gust", "—", "km/h", MUTED),
-        metric_card("P", "Minimum pressure", "—", "hPa", MUTED),
-        metric_card("≋", "Sea level (vs. mean)", "—", "m", MUTED),
+        metric_card(
+            "P", "Minimum pressure", "—", "hPa", MUTED,
+            info="Falling atmospheric pressure often signals an approaching storm system — it's shown here as an early warning signal, not a direct danger measure like wave height.",
+        ),
+        metric_card(
+            "≋", "Sea level (vs. mean)", "—", "m", MUTED,
+            info="How much higher or lower the sea is right now compared to this location's own long-term average — a sustained rise can indicate storm surge.",
+        ),
         metric_card("◉", "Days recorded", "0", "", MUTED),
     ]
 
@@ -788,8 +794,14 @@ def update_emergency_page(location):
         metric_card("≈", "Maximum wave height", wave_value, "m", status_color, note=wave_note),
         metric_card("≋", "Maximum wind speed", wind_value, "km/h", WIND_LINE, note=wind_note or None),
         metric_card("↯", "Maximum wind gust", gust_value, "km/h", GUST_LINE, note=gust_note or None),
-        metric_card("P", "Minimum pressure", pressure_value, "hPa", PRESSURE_LINE, note=pressure_note or None),
-        metric_card("≋", "Sea level (vs. mean)", sea_level_value, "m", ACCENT_TEAL, note=sea_level_note or None),
+        metric_card(
+            "P", "Minimum pressure", pressure_value, "hPa", PRESSURE_LINE, note=pressure_note or None,
+            info="Falling atmospheric pressure often signals an approaching storm system — it's shown here as an early warning signal, not a direct danger measure like wave height.",
+        ),
+        metric_card(
+            "≋", "Sea level (vs. mean)", sea_level_value, "m", ACCENT_TEAL, note=sea_level_note or None,
+            info="How much higher or lower the sea is right now compared to this location's own long-term average — a sustained rise can indicate storm surge.",
+        ),
         metric_card("◉", "Days recorded", str(observation_count), "", LIVE_COLOR),
     ]
 

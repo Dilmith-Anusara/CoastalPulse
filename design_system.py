@@ -101,7 +101,7 @@ def section_title(title, subtitle=None):
     return html.Div(children)
 
 
-def metric_card(icon, label, value, unit="", accent=ACCENT_BLUE, note=None):
+def metric_card(icon, label, value, unit="", accent=ACCENT_BLUE, note=None, info=None):
     """A single stat tile. `value` can be either:
       - a plain string/number to render immediately (e.g. Tourism's
         plain-language condition chips), or
@@ -110,6 +110,13 @@ def metric_card(icon, label, value, unit="", accent=ACCENT_BLUE, note=None):
 
     `note`, if given, is a short muted caption under the value (e.g. a
     plain-language band like "Choppy" alongside a raw "1.2 m" reading).
+
+    `info`, if given, adds a small "i" mark next to the label with this
+    text as a native browser tooltip (plain `title` attribute — no extra
+    JS/CSS) — for labels like "Minimum pressure" or "Sea level (vs. mean)"
+    where even a band/note doesn't explain what the metric means or why
+    it's on the page, unlike "Wind speed" or "Wave height" which are
+    self-explanatory from the name alone.
     """
     if isinstance(value, (str, int, float)):
         value_node = html.Span(
@@ -142,6 +149,16 @@ def metric_card(icon, label, value, unit="", accent=ACCENT_BLUE, note=None):
                         label,
                         style={"fontSize": "12px", "fontWeight": "600", "color": MUTED, "marginLeft": "10px"},
                     ),
+                    html.Span(
+                        "ⓘ",
+                        title=info,
+                        style={
+                            "fontSize": "12px",
+                            "color": MUTED,
+                            "marginLeft": "5px",
+                            "cursor": "help",
+                        },
+                    ) if info else None,
                 ],
                 style={"display": "flex", "alignItems": "center", "marginBottom": "18px"},
             ),
