@@ -26,7 +26,7 @@ import pandas as pd
 from data_access import get_tourism_data, get_tourism_extras, get_tourism_forecast
 from design_system import (
     CARD, TEXT, MUTED, BORDER, NAVY, NAVY_2,
-    ACCENT_BLUE, ACCENT_ORANGE, ACCENT_TEAL, ACCENT_PINK, ACCENT_PURPLE, ACCENT_GREEN,
+    ACCENT_BLUE, ACCENT_ORANGE, ACCENT_TEAL, ACCENT_PINK, ACCENT_PURPLE,
     PAGE_STYLE, HERO_STYLE, CARD_STYLE, VERDICT_ZONE_CLASS, DETAIL_ZONE_CLASS,
     section_title, metric_card, chart_card, day_pill, day_strip_grid,
     empty_chart, empty_map, stat_gauge_figure,
@@ -92,6 +92,13 @@ try:
 except ImportError:
     _page_helpers_score_band = None
 
+# uv_band/aqi_band: WHO/EPA-standard bands with real colors (page_helpers.py),
+# used to color the UV and Air quality metric cards by severity the same way
+# Emergency colors its wave-height card — reserved for metrics backed by an
+# actual external standard, not an invented scale, same rule Emergency's own
+# metric-card notes follow.
+from page_helpers import uv_band, aqi_band, value_percentile_note
+
 
 def score_band(score):
     if score is None or pd.isna(score):
@@ -141,20 +148,6 @@ def suitability_context_text(history_score_series, current_score, location_label
     return f"Fairly typical for {location_label} — around the middle of the range recorded here."
 
 
-def _uv_band(uv):
-    if uv is None or pd.isna(uv):
-        return "—"
-    if uv < 3:
-        return "Low"
-    if uv < 6:
-        return "Moderate"
-    if uv < 8:
-        return "High"
-    if uv < 11:
-        return "Very High"
-    return "Extreme"
-
-
 def _wave_band(wave):
     if wave is None or pd.isna(wave):
         return "—"
@@ -175,25 +168,6 @@ def _rain_band(precip):
     if precip < 5:
         return "Light rain"
     return "Rainy"
-
-
-def _us_aqi_band(aqi):
-    """Official US EPA AQI bands — aqi here is Open-Meteo's own us_aqi
-    (a real computed index combining PM2.5/PM10/ozone/NO2/SO2/CO), not a
-    PM2.5-only approximation like the old _aqi_band it replaced."""
-    if aqi is None or pd.isna(aqi):
-        return "—"
-    if aqi <= 50:
-        return "Good"
-    if aqi <= 100:
-        return "Moderate"
-    if aqi <= 150:
-        return "Unhealthy for sensitive groups"
-    if aqi <= 200:
-        return "Unhealthy"
-    if aqi <= 300:
-        return "Very unhealthy"
-    return "Hazardous"
 
 
 # WMO weather codes actually observed in this dataset (per the EDA
@@ -493,8 +467,9 @@ def update_tourism_page(location):
 
     # --- Condition metric cards ---
     wave_label = _wave_band(latest.get("wave_height_mean"))
-    uv_label = _uv_band(latest.get("uv_index_mean"))
+    uv_label, uv_color = uv_band(latest.get("uv_index_mean"))
     rain_label = _rain_band(latest.get("precipitation_sum"))
+    aqi_label, aqi_color = aqi_band(latest.get("us_aqi_mean"))
     sst = latest.get("sea_surface_temp_mean")
     sst_text = f"{sst:.1f}°C" if pd.notna(sst) else "N/A"
 
@@ -511,17 +486,27 @@ def update_tourism_page(location):
     weather_note = f"{cloud_val:.0f}% cloud cover" if pd.notna(cloud_val) else None
     aqi_val = latest.get("us_aqi_mean")
 
+    feels_like_note = value_percentile_note(feels_like_val, data["apparent_temperature_mean"], "days") if "apparent_temperature_mean" in data.columns else ""
+    wind_note = value_percentile_note(wind_val, data["wind_speed_mean"], "days") if "wind_speed_mean" in data.columns else ""
+    humidity_note = value_percentile_note(humidity_val, data["humidity_mean"], "days") if "humidity_mean" in data.columns else ""
+    sst_note = value_percentile_note(sst, data["sea_surface_temp_mean"], "days") if "sea_surface_temp_mean" in data.columns else ""
+    if not sst_note and pd.isna(sst):
+        # Same wording as fisherman.py's identical case — null by design at
+        # the 5 TOURISM_ONLY locations (no marine_ocean fetch there).
+        sst_note = "Not measured at this location"
+    sunshine_note = value_percentile_note(sunshine_val, data["sunshine_hours_sum"], "days") if "sunshine_hours_sum" in data.columns else ""
+
     chips = [
         metric_card("\u2601", "Weather", weather_text, "", accent=ACCENT_PURPLE, note=weather_note),
-        metric_card("\U0001F321", "Feels like", f"{feels_like_val:.0f}" if pd.notna(feels_like_val) else "\u2014", "\u00b0C", accent=ACCENT_PINK),
+        metric_card("\U0001F321", "Feels like", f"{feels_like_val:.0f}" if pd.notna(feels_like_val) else "\u2014", "\u00b0C", accent=ACCENT_PINK, note=feels_like_note or None),
         metric_card("\U0001F30A", "Wave height", f"{wave_val:.2f}" if pd.notna(wave_val) else "\u2014", "m", accent=ACCENT_BLUE, note=wave_label),
-        metric_card("\U0001F4A8", "Wind speed", f"{wind_val:.1f}" if pd.notna(wind_val) else "\u2014", "km/h", accent=ACCENT_PURPLE),
-        metric_card("\U0001F4A7", "Humidity", f"{humidity_val:.0f}" if pd.notna(humidity_val) else "\u2014", "%", accent=ACCENT_BLUE),
-        metric_card("\u2600", "UV index", f"{uv_val:.1f}" if pd.notna(uv_val) else "\u2014", "", accent=ACCENT_ORANGE, note=uv_label),
+        metric_card("\U0001F4A8", "Wind speed", f"{wind_val:.1f}" if pd.notna(wind_val) else "\u2014", "km/h", accent=ACCENT_PURPLE, note=wind_note or None),
+        metric_card("\U0001F4A7", "Humidity", f"{humidity_val:.0f}" if pd.notna(humidity_val) else "\u2014", "%", accent=ACCENT_BLUE, note=humidity_note or None),
+        metric_card("\u2600", "UV index", f"{uv_val:.1f}" if pd.notna(uv_val) else "\u2014", "", accent=uv_color, note=uv_label),
         metric_card("\U0001F327", "Rainfall", f"{precip_val:.1f}" if pd.notna(precip_val) else "\u2014", "mm", accent=ACCENT_TEAL, note=rain_label),
-        metric_card("\U0001F321", "Sea temp", sst_text, "", accent=ACCENT_PINK),
-        metric_card("\u2600", "Sunshine", f"{sunshine_val:.1f}" if pd.notna(sunshine_val) else "\u2014", "hrs", accent=ACCENT_ORANGE),
-        metric_card("\U0001F4A8", "Air quality", f"{aqi_val:.0f}" if pd.notna(aqi_val) else "\u2014", "AQI", accent=ACCENT_GREEN, note=_us_aqi_band(aqi_val)),
+        metric_card("\U0001F321", "Sea temp", sst_text, "", accent=ACCENT_PINK, note=sst_note or None),
+        metric_card("\u2600", "Sunshine", f"{sunshine_val:.1f}" if pd.notna(sunshine_val) else "\u2014", "hrs", accent=ACCENT_ORANGE, note=sunshine_note or None),
+        metric_card("\U0001F4A8", "Air quality", f"{aqi_val:.0f}" if pd.notna(aqi_val) else "\u2014", "AQI", accent=aqi_color, note=aqi_label),
     ]
 
     # --- Surf detail — latest hourly snapshot from silver_hourly, not

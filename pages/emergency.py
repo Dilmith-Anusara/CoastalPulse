@@ -60,6 +60,11 @@ except Exception as exc:
     CLASSIFICATION_COLORS = _FALLBACK_CLASSIFICATION_COLORS
     EMERGENCY_VERDICT_TEXT = _FALLBACK_EMERGENCY_VERDICT_TEXT
 
+# value_percentile_note is new (added alongside this page's own note-text
+# work), so there's no legacy shape to fall back to the way the import
+# above does — a plain import is enough.
+from page_helpers import value_percentile_note
+
 
 def _hex_to_rgba(hex_color, alpha=0.55):
     hex_color = (hex_color or "#71828C").lstrip("#")
@@ -162,6 +167,21 @@ def history_context_text(history_wave_series, current_wave, location_label):
     if percentile <= 30:
         return f"Calmer than usual — lower than {100 - percentile:.0f}% of days recorded at {location_label}."
     return f"Fairly typical for {location_label} — around the middle of the range recorded here."
+
+
+def _empty_metric_cards():
+    """Placeholder row for the no-location/error/no-data states — same 6
+    cards, dashed values, no note or severity color since there's nothing
+    real to compare or classify yet.
+    """
+    return [
+        metric_card("≈", "Maximum wave height", "—", "m", MUTED),
+        metric_card("≋", "Maximum wind speed", "—", "km/h", MUTED),
+        metric_card("↯", "Maximum wind gust", "—", "km/h", MUTED),
+        metric_card("P", "Minimum pressure", "—", "hPa", MUTED),
+        metric_card("≋", "Sea level (vs. mean)", "—", "m", MUTED),
+        metric_card("◉", "Days recorded", "0", "", MUTED),
+    ]
 
 
 # ============================================================
@@ -509,14 +529,7 @@ layout = html.Div(
         html.Div(
             [
                 html.Div(
-                    [
-                        metric_card("≈", "Maximum wave height", html.Span(id="emergency-wave-value"), "m", WAVE_LINE),
-                        metric_card("≋", "Maximum wind speed", html.Span(id="emergency-wind-value"), "km/h", WIND_LINE),
-                        metric_card("↯", "Maximum wind gust", html.Span(id="emergency-gust-value"), "km/h", GUST_LINE),
-                        metric_card("P", "Minimum pressure", html.Span(id="emergency-pressure-value"), "hPa", PRESSURE_LINE),
-                        metric_card("≋", "Sea level (vs. mean)", html.Span(id="emergency-sea-level-value"), "m", ACCENT_TEAL),
-                        metric_card("◉", "Days recorded", html.Span(id="emergency-observation-value"), "", LIVE_COLOR),
-                    ],
+                    id="emergency-metric-cards",
                     style={
                         "display": "grid",
                         "gridTemplateColumns": "repeat(auto-fit, minmax(180px, 1fr))",
@@ -591,12 +604,7 @@ layout = html.Div(
     Output("emergency-history-note", "children"),
     Output("emergency-updated", "children"),
     Output("emergency-gauge", "figure"),
-    Output("emergency-wave-value", "children"),
-    Output("emergency-wind-value", "children"),
-    Output("emergency-gust-value", "children"),
-    Output("emergency-pressure-value", "children"),
-    Output("emergency-sea-level-value", "children"),
-    Output("emergency-observation-value", "children"),
+    Output("emergency-metric-cards", "children"),
     Output("emergency-day-strip", "children"),
     Output("emergency-forecast-strip", "children"),
     Output("emergency-forecast-generated", "children"),
@@ -626,12 +634,7 @@ def update_emergency_page(location):
             "",
             "",
             empty_gauge(),
-            "—",
-            "—",
-            "—",
-            "—",
-            "—",
-            "0",
+            _empty_metric_cards(),
             [],
             [],
             "",
@@ -661,12 +664,7 @@ def update_emergency_page(location):
             "",
             "Data could not be retrieved.",
             empty_gauge(),
-            "—",
-            "—",
-            "—",
-            "—",
-            "—",
-            "0",
+            _empty_metric_cards(),
             [],
             [],
             "",
@@ -694,12 +692,7 @@ def update_emergency_page(location):
             "",
             "No data available.",
             empty_gauge(),
-            "—",
-            "—",
-            "—",
-            "—",
-            "—",
-            "0",
+            _empty_metric_cards(),
             [],
             [],
             "",
@@ -774,6 +767,31 @@ def update_emergency_page(location):
     # (Jan 29 - Feb 9 2025, confirmed directly against their live API),
     # not a pipeline bug. "—" here is the correct, honest display for it.
     sea_level_value = f"{sea_level:.2f}" if pd.notna(sea_level) else "—"
+
+    # --------------------------------------------------------
+    # Metric card notes + severity color — a bare "1.96 m" means
+    # nothing to someone who doesn't already know what's typical here.
+    # Wave height reuses the classification already computed above (it
+    # IS the number the Safe/Caution/Dangerous verdict is based on), so
+    # no new threshold is invented. Wind/gust/pressure/sea-level have no
+    # established safety scale in this project, so they get an honest
+    # "higher/lower than usual here" comparison instead (page_helpers.
+    # value_percentile_note) rather than a fabricated severity color.
+    # --------------------------------------------------------
+    wave_note = classification if pd.notna(wave) else None
+    wind_note = value_percentile_note(wind, data["wind_speed_max"], "days") if "wind_speed_max" in data.columns else ""
+    gust_note = value_percentile_note(gust, data["wind_gust_max"], "days") if "wind_gust_max" in data.columns else ""
+    pressure_note = value_percentile_note(pressure, data["pressure_min"], "days") if "pressure_min" in data.columns else ""
+    sea_level_note = value_percentile_note(sea_level, data["sea_level_height_max"], "days") if "sea_level_height_max" in data.columns else ""
+
+    metric_cards = [
+        metric_card("≈", "Maximum wave height", wave_value, "m", status_color, note=wave_note),
+        metric_card("≋", "Maximum wind speed", wind_value, "km/h", WIND_LINE, note=wind_note or None),
+        metric_card("↯", "Maximum wind gust", gust_value, "km/h", GUST_LINE, note=gust_note or None),
+        metric_card("P", "Minimum pressure", pressure_value, "hPa", PRESSURE_LINE, note=pressure_note or None),
+        metric_card("≋", "Sea level (vs. mean)", sea_level_value, "m", ACCENT_TEAL, note=sea_level_note or None),
+        metric_card("◉", "Days recorded", str(observation_count), "", LIVE_COLOR),
+    ]
 
     if "date" in data.columns and pd.notna(current["date"]):
         updated_text = "Latest observation: " + current["date"].strftime("%d %b %Y")
@@ -963,12 +981,7 @@ def update_emergency_page(location):
         history_note,
         updated_text,
         gauge_fig,
-        wave_value,
-        wind_value,
-        gust_value,
-        pressure_value,
-        sea_level_value,
-        str(observation_count),
+        metric_cards,
         day_cards,
         forecast_cards,
         forecast_generated_text,
