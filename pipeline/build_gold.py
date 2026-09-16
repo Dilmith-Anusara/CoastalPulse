@@ -233,12 +233,27 @@ _WIND_TABLE = [
 
 
 def _rate_from_table(value, table):
+    """Matches `value` against each band's own lower bound and the NEXT
+    band's lower bound — not the stated upper bound (e.g. "11.99" before
+    a "12" lower bound). The tables' printed upper bounds are for
+    readability only; comparing against them left a real ~0.01 gap
+    between adjacent bands that a continuous mean/sum (not a rounded
+    input) can land in, e.g. wind_speed_mean = 19.991666... matched
+    neither "10-19.99" nor "20-29.99". The old fallback then silently
+    returned the table's LAST entry regardless of where the value
+    actually belonged — confirmed against real gold_tourism_daily data,
+    where this turned a ~20 km/h (calm) wind reading into a rating of
+    -10 (the "extreme gale" tier) instead of the correct +9. Comparing
+    against the next band's lower bound instead removes the gap
+    entirely, rather than patching individual boundary values.
+    """
     if value is None or pd.isna(value):
         return None
-    for lo, hi, rate in table:
-        if lo <= value <= hi:
+    for i, (lo, _hi, rate) in enumerate(table):
+        upper = table[i + 1][0] if i + 1 < len(table) else math.inf
+        if lo <= value < upper:
             return rate
-    return table[0][2] if value < table[0][0] else table[-1][2]
+    return table[-1][2]
 
 
 def thermal_comfort_value(t_max: float, rh_mean: float) -> float:

@@ -100,9 +100,14 @@ _FISHERMAN_VERDICT_TEXT = {
     None: "Not enough recent data for this location to advise.",
 }
 
+# Full names, not abbreviations ("SSW" reads as a typo to anyone who
+# doesn't already know 16-point compass shorthand — "South-Southwest"
+# doesn't need that knowledge).
 _COMPASS_POINTS = [
-    "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
-    "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW",
+    "North", "North-Northeast", "Northeast", "East-Northeast",
+    "East", "East-Southeast", "Southeast", "South-Southeast",
+    "South", "South-Southwest", "Southwest", "West-Southwest",
+    "West", "West-Northwest", "Northwest", "North-Northwest",
 ]
 
 
